@@ -21,7 +21,7 @@ button.on{background:var(--accent);border-color:var(--accent);color:var(--accent
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.k{color:var(--mut);font-size:12px}.v{font-size:22px;font-weight:700;margin-top:3px}
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
 .b-ok{background:rgba(53,211,160,.14);color:var(--green)}.b-warn{background:rgba(224,169,59,.15);color:var(--amber)}.b-mut{background:var(--bg);color:var(--mut);border:1px solid var(--line)}.b-red{background:rgba(255,92,106,.15);color:var(--red)}.b-pro{background:var(--bg);color:var(--signal);border:1px solid var(--line)}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.crit{background:var(--red)}.high{background:var(--amber)}.medium{background:#6b7a99}.low{background:#4a5b7d}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.crit,.critical{background:var(--red)}.high{background:var(--amber)}.medium{background:#6b7a99}.low{background:#4a5b7d}
 .pill{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--bg);color:var(--link);border:1px solid var(--line)}
 .fnd{border-left:4px solid var(--line)}.fnd.approved{border-left-color:var(--accent)}.fnd.submitted{border-left-color:var(--amber)}.fnd.rejected,.fnd.parked{border-left-color:var(--line);opacity:.7}
 .empty{color:var(--mut);font-size:13px}.foot{color:var(--mut);font-size:12px;margin-top:20px;text-align:center}
@@ -66,6 +66,16 @@ button.on{background:var(--accent);border-color:var(--accent);color:var(--accent
 .trow:hover{background:var(--bg)}
 .chbadge{position:absolute;top:-7px;right:-7px;background:var(--red);color:#fff;border-radius:20px;font-size:10px;line-height:16px;height:16px;min-width:16px;padding:0 5px;text-align:center;display:none}
 .rframe{width:100%;height:560px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.bar{height:8px;background:var(--bg);border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:1}.bar>div{height:100%;background:var(--accent);transition:width .2s}
+.tlrow{display:flex;gap:10px;align-items:baseline;padding:7px 10px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;margin-bottom:6px;background:var(--card)}
+.iocrow{display:flex;gap:9px;align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;background:var(--card)}
+.tkrow{display:flex;gap:9px;align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;background:var(--card)}
+.tkrow.done{opacity:.55}.tkrow.done .tktext{text-decoration:line-through}
+.subtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.filterchip{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);background:var(--bg);color:var(--mut);cursor:pointer}
+.filterchip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.srchres{border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-bottom:5px;background:var(--card);font-size:13px}
 </style>`;
 
 const PREFJS = `
@@ -122,42 +132,97 @@ async function register(){const name=document.getElementById('rname').value.trim
 function portfolio() {
   return HEAD("Skyhawk") + APPCSS + `<body><div class="wrap">
 <div class="top"><div class="logo" id="logo">SKYHAWK</div><div class="sub" style="flex:1">air-gapped · <span id="store"></span></div><div class="appx" id="appx"></div><div class="me" id="me"></div></div>
-<div class="grid" style="margin-bottom:6px">
-<div class="card" style="margin:0"><div class="k">Open cases</div><div class="v" id="mOpen">—</div></div>
-<div class="card" style="margin:0"><div class="k">In technical report</div><div class="v" id="mFin">—</div></div>
+<div class="grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:6px">
+<div class="card" style="margin:0"><div class="k">Active cases</div><div class="v" id="mOpen">—</div></div>
+<div class="card" style="margin:0"><div class="k">Critical cases</div><div class="v" id="mCrit">—</div></div>
 <div class="card" style="margin:0"><div class="k">Total findings</div><div class="v" id="mFnd">—</div></div>
+<div class="card" style="margin:0"><div class="k">IOCs tracked</div><div class="v" id="mIoc">—</div></div>
 </div>
+<h2>Search everything</h2>
+<div class="card"><div class="row"><input id="gq" class="t" placeholder="Search cases, findings, IOCs (e.g. LSASS, 45.155.204.11, T1486)" oninput="gSearch()"></div><div id="gres" style="margin-top:8px"></div></div>
 <h2>New investigation</h2>
-<div class="card"><div class="row"><input id="nt" class="t" placeholder="Case title (e.g. Contoso BEC / account takeover)"><button onclick="mk()">Create case</button></div></div>
-<h2>Investigations</h2><div id="list"></div>
+<div class="card"><div class="row"><input id="nt" class="t" placeholder="Case title (e.g. Contoso BEC / account takeover)"><select id="nsev" style="width:110px"><option value="critical">Critical</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select><button onclick="mk()">Create case</button></div></div>
+<h2>Investigations</h2>
+<div class="row" id="filters" style="margin-bottom:9px"></div>
+<div id="list"></div>
+<div class="row" id="adminrow" style="margin-top:12px"></div>
 <div class="foot">Skyhawk · runs offline</div></div>
+<input type="file" id="impfile" accept="application/json" style="display:none" onchange="impCase(this)">
 <script>
 ${PREFJS}
 const uid=localStorage.getItem('hs_uid');if(!uid){location.href='/login';}
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 document.getElementById('me').innerHTML='<span class="badge b-pro">'+localStorage.getItem('hs_title')+'</span> '+esc(localStorage.getItem('hs_name'))+' · <a href="#" onclick="fetch(\\'/api/auth/logout\\',{method:\\'POST\\'}).then(function(){localStorage.clear();location.href=\\'/login\\';});return false">switch</a>';
 buildAppx(uid);initPrefs(uid);
-async function mk(){const t=document.getElementById('nt');if(!t.value.trim())return;const r=await fetch('/api/investigations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t.value,actorId:uid})});const j=await r.json();if(j.error){alert(j.error);return;}t.value='';load();}
+let pcache=[],pfilter='active',myCaps=[];
+const FILTERS=[['active','Active'],['all','All'],['open','Open'],['contained','Contained'],['eradicated','Eradicated'],['recovered','Recovered'],['closed','Closed'],['frozen','Frozen']];
+function dl(name,obj){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},4000);}
+async function mk(){const t=document.getElementById('nt');if(!t.value.trim())return;const r=await fetch('/api/investigations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t.value,severity:document.getElementById('nsev').value,actorId:uid})});const j=await r.json();if(j.error){alert(j.error);return;}t.value='';load();}
+function setFilter(f){pfilter=f;renderList();}
+function renderFilters(){document.getElementById('filters').innerHTML=FILTERS.map(function(f){return '<span class="filterchip'+(pfilter===f[0]?' on':'')+'" onclick="setFilter(\\''+f[0]+'\\')">'+f[1]+'</span>';}).join('');}
+function invCard(i){
+  const tk=i.tasksTotal?' · tasks '+i.tasksDone+'/'+i.tasksTotal:'';
+  const frozen=i.finalized?' <span class="badge b-ok">formal v'+i.formalVersion+' frozen</span>':'';
+  const who=i.assignee?' · lead: '+esc(i.assignee):'';
+  return '<div class="card invcard"><div><a href="/inv?id='+encodeURIComponent(i.id)+'"><span class="dot '+esc(i.severity)+'"></span><b>'+esc(i.id)+'</b> · '+esc(i.title)+'</a> <span class="badge '+(i.status==='closed'?'b-mut':i.status==='open'?'b-warn':'b-pro')+'">'+esc(i.status)+'</span>'+frozen+'<div class="k" style="margin-top:3px">'+i.findings+' findings · '+i.technical+' technical · '+i.formal+' formal · '+i.iocs+' IOCs'+tk+who+'</div></div><a href="/inv?id='+encodeURIComponent(i.id)+'">Open →</a></div>';}
+function renderList(){
+  renderFilters();
+  const rows=pcache.filter(function(i){
+    if(pfilter==='all')return true;
+    if(pfilter==='active')return i.status!=='closed';
+    if(pfilter==='frozen')return i.finalized;
+    return i.status===pfilter;});
+  document.getElementById('list').innerHTML=rows.length?rows.map(invCard).join(''):'<div class="empty">'+(pcache.length?'No cases match this filter.':'No investigations yet. Create one above.')+'</div>';
+}
+let gqTimer=null;
+function gSearch(){clearTimeout(gqTimer);gqTimer=setTimeout(gSearchNow,220);}
+async function gSearchNow(){
+  const q=document.getElementById('gq').value.trim();const box=document.getElementById('gres');
+  if(q.length<2){box.innerHTML='';return;}
+  const r=await (await fetch('/api/search?q='+encodeURIComponent(q))).json();
+  let h='';
+  h+=r.cases.map(function(c){return '<div class="srchres"><a href="/inv?id='+encodeURIComponent(c.id)+'"><b>'+esc(c.id)+'</b> · '+esc(c.title)+'</a> <span class="badge b-pro">case · '+esc(c.status)+'</span></div>';}).join('');
+  h+=r.findings.map(function(f){return '<div class="srchres"><a href="/inv?id='+encodeURIComponent(f.invId)+'"><span class="dot '+esc(f.severity)+'"></span>'+esc(f.title)+'</a> <span class="badge b-mut">finding · '+esc(f.invId)+'</span></div>';}).join('');
+  h+=r.iocs.map(function(x){return '<div class="srchres"><a href="/inv?id='+encodeURIComponent(x.invId)+'"><span class="mono">'+esc(x.value)+'</span></a> <span class="badge b-mut">IOC · '+esc(x.type)+' · '+esc(x.invId)+'</span></div>';}).join('');
+  box.innerHTML=h||'<div class="empty">No matches.</div>';
+}
+async function dlBackup(){const r=await fetch('/api/backup');const j=await r.json();if(j.error){alert(j.error);return;}dl('skyhawk-backup-'+new Date().toISOString().slice(0,10)+'.json',j);}
+async function impCase(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
+  try{
+    const bundle=JSON.parse(await f.text());
+    const r=await fetch('/api/investigations/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bundle,actorId:uid})});
+    const j=await r.json();if(j.error){alert(j.error);return;}
+    alert('Imported as '+j.id+(j.chainIntact?' — audit chain intact':' — WARNING: audit chain did not verify'));load();
+  }catch(e){alert('Not a valid SKYHAWK bundle: '+e.message);}
+}
+async function initMe(){try{const me=await (await fetch('/api/me')).json();myCaps=me.caps||[];if(myCaps.indexOf('user.manage')>=0){document.getElementById('adminrow').innerHTML='<button class="ghost" onclick="document.getElementById(\\'impfile\\').click()">Import case bundle</button><button class="ghost" onclick="dlBackup()">Download full backup</button><span class="k">MC only — case bundles move investigations between air-gapped enclaves.</span>';}}catch(e){}}
+initMe();
 async function load(){
   const h=await (await fetch('/health')).json();document.getElementById('store').textContent='store: '+h.store;
-  const pr=await fetch('/api/portfolio');if(pr.status===401){localStorage.clear();location.href='/login';return;}const p=await pr.json();let open=0,fin=0,fnd=0;
-  document.getElementById('list').innerHTML=p.length?p.map(i=>{if(i.status==='open')open++;fin+=i.technical;fnd+=i.findings;
-    return '<div class="card invcard"><div><a href="/inv?id='+encodeURIComponent(i.id)+'"><b>'+esc(i.id)+'</b> · '+esc(i.title)+'</a><div class="k" style="margin-top:3px">'+i.findings+' findings · '+i.technical+' technical · '+i.formal+' formal'+(i.finalized?' · <span class="badge b-ok">formal frozen</span>':'')+'</div></div><a href="/inv?id='+encodeURIComponent(i.id)+'">Open →</a></div>';}).join(''):'<div class="empty">No investigations yet. Create one above.</div>';
-  document.getElementById('mOpen').textContent=open;document.getElementById('mFin').textContent=fin;document.getElementById('mFnd').textContent=fnd;
+  const pr=await fetch('/api/portfolio');if(pr.status===401){localStorage.clear();location.href='/login';return;}const p=await pr.json();
+  pcache=p;let open=0,crit=0,fnd=0,ioc=0;
+  p.forEach(function(i){if(i.status!=='closed')open++;if(i.severity==='critical'&&i.status!=='closed')crit++;fnd+=i.findings;ioc+=i.iocs;});
+  renderList();
+  document.getElementById('mOpen').textContent=open;document.getElementById('mCrit').textContent=crit;document.getElementById('mFnd').textContent=fnd;document.getElementById('mIoc').textContent=ioc;
 }
 load();setInterval(load,3000);
 </script>${CHATHTML}<script>${CHATJS}</script></body></html>`;
 }
-module.exports = { login, portfolio, esc, HEAD, APPCSS };
 
 // ---------------- workspace ----------------
 function workspace(id) {
   return HEAD("SKYHAWK · " + esc(id)) + APPCSS + `<body><div class="wrap">
 <div class="top"><div class="logo" id="logo">SKYHAWK</div><div style="flex:1"><div><a href="/">← Portfolio</a> &nbsp; <b id="ititle"></b></div><div class="sub" id="imeta"></div></div><div class="appx" id="appx"></div><div class="me" id="me"></div></div>
+<div class="row" id="invctl" style="margin-bottom:10px"></div>
 <div class="tabs">
   <div class="tab on" onclick="showTab('findings')" id="tab-findings">Findings</div>
+  <div class="tab" onclick="showTab('timeline')" id="tab-timeline">Timeline</div>
+  <div class="tab" onclick="showTab('iocs')" id="tab-iocs">IOCs</div>
+  <div class="tab" onclick="showTab('tasks')" id="tab-tasks">Tasks</div>
   <div class="tab" onclick="showTab('map')" id="tab-map">Network map</div>
   <div class="tab" onclick="showTab('report')" id="tab-report">Report</div>
+  <div class="tab" onclick="showTab('audit')" id="tab-audit">Audit</div>
 </div>
 <div class="panel on" id="p-findings">
   <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:6px">
@@ -193,9 +258,50 @@ function workspace(id) {
   <div style="overflow:auto"><div class="mcanvas" id="mcanvas"></div></div>
   <div class="card" id="mdetail" style="margin-top:10px"></div>
 </div>
+<div class="panel" id="p-timeline">
+  <h2>Add event</h2>
+  <div class="card"><div class="row">
+    <input type="datetime-local" id="tlat" style="width:200px">
+    <select id="tlsrc" style="width:130px"></select>
+    <input id="tltext" class="t" placeholder="What happened (e.g. beacon to 45.155.204.11 from WEB01)" onkeydown="if(event.key==='Enter')tlAdd()">
+    <button onclick="tlAdd()">Add event</button>
+  </div></div>
+  <h2>Incident timeline <span class="k" id="tlcount"></span></h2>
+  <div id="tllist"></div>
+</div>
+<div class="panel" id="p-iocs">
+  <h2>Track indicator</h2>
+  <div class="card">
+    <div class="row"><input id="iocv" class="t mono" placeholder="Value — IP, domain, hash, URL, email, CVE, path (type auto-detected)" onkeydown="if(event.key==='Enter')iocAdd()"><input id="iocn" placeholder="Note" style="width:170px"><button onclick="iocAdd()">Add IOC</button><button class="ghost" onclick="iocExtract()">Extract from findings</button></div>
+    <div id="iocsug" style="margin-top:8px"></div>
+  </div>
+  <h2>Indicators of compromise <span class="k" id="ioccount"></span></h2>
+  <div id="ioclist"></div>
+</div>
+<div class="panel" id="p-tasks">
+  <h2>Response checklist</h2>
+  <div class="card">
+    <div class="row" style="margin-bottom:9px"><select id="tktpl" style="width:150px"></select><button class="ghost" onclick="tkTpl()">Apply playbook</button><span class="k" style="flex:1"></span><select id="tkphase" style="width:120px"></select><input id="tktext" placeholder="Custom task" style="flex:2;min-width:160px" onkeydown="if(event.key==='Enter')tkAdd()"><button onclick="tkAdd()">Add</button></div>
+    <div class="row"><div class="bar"><div id="tkbar" style="width:0%"></div></div><span class="k" id="tkpct"></span></div>
+  </div>
+  <div id="tklist"></div>
+</div>
 <div class="panel" id="p-report">
-  <div class="row" style="margin-bottom:8px"><a id="rlink" target="_blank">Open in new tab / Print</a> <span class="k">— live technical report</span></div>
+  <div class="subtabs">
+    <div class="tab on" id="rt-technical" onclick="setRMode('technical')">Technical (live)</div>
+    <div class="tab" id="rt-formal" onclick="setRMode('formal')">Formal (frozen)</div>
+  </div>
+  <div id="formalPane" style="display:none">
+    <div id="fzbanner"></div>
+    <div id="formalCompose"></div>
+  </div>
+  <div class="row" style="margin-bottom:8px"><a id="rlink" target="_blank">Open in new tab / Print</a> <span class="k" id="rnote">— live technical report</span></div>
   <iframe class="rframe" id="rframe"></iframe>
+</div>
+<div class="panel" id="p-audit">
+  <div class="row" style="margin-bottom:9px"><span id="auditBadge"></span><span class="k" id="auditMeta"></span><button class="ghost" onclick="loadAudit()">Re-verify</button></div>
+  <div class="empty" style="margin-bottom:8px">Every action on this case is recorded in a hash-chained, tamper-evident log. Any retroactive edit breaks the chain.</div>
+  <div id="auditList"></div>
 </div>
 </div>
 ${CHATHTML}
@@ -207,13 +313,21 @@ const uid=localStorage.getItem('hs_uid');if(!uid){location.href='/login';}
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 let devices=[],caps=[],sigF="",pendingAssets=[],pendingShots=[],expanded=new Set(),lastFindings=[];
 let mNodes=[],mEdges=[],mSel=null,mLoaded=false,mDrag=null,mMoved=false,mLink=null,ATT=null;
+let S=null,rmode='technical',sigT='',sigI='',sigK='',sigC='',sigFm='',selsInit=false,iocSugs=[];
 const hasCap=c=>caps.includes(c);
 document.getElementById('me').innerHTML='<span class="badge b-pro">'+localStorage.getItem('hs_title')+'</span> '+esc(localStorage.getItem('hs_name'))+' · <a href="#" onclick="doLogout();return false">switch</a>';
 function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(function(){localStorage.clear();location.href='/login';});}
 buildAppx(uid);initPrefs(uid);
 document.getElementById('rlink').href='/investigations/'+encodeURIComponent(INV)+'/report/technical';
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({actorId:uid},b||{}))});const j=await r.json().catch(()=>({}));if(!r.ok){alert(j.error||'error');throw new Error(j.error);}return j;}
-function showTab(t){['findings','map','report'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});if(t==='report'){document.getElementById('rframe').src='/investigations/'+encodeURIComponent(INV)+'/report/technical?ts='+Date.now();}if(t==='map'){mRender();}}
+function showTab(t){['findings','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
+  if(t==='report'){refreshReport();}
+  if(t==='map'){mRender();}
+  if(t==='audit'){loadAudit();}
+  if(t==='timeline'&&!document.getElementById('tlat').value){setTlNow();}}
+function dl(name,obj){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},4000);}
+async function postQ(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({actorId:uid},b||{}))});return r.json().catch(function(){return{};});}
+function userNameOf(id){const u=((S&&S.users)||[]).find(function(x){return x.id===id;});return u?u.name:(id||'');}
 
 function renderStaging(){document.getElementById('assetChips').innerHTML=pendingAssets.map(function(a,i){return '<span class="pill">'+esc(a.type)+' · '+esc(a.name)+(a.ip?' · '+esc(a.ip):'')+' <a href="#" onclick="rmAsset('+i+');return false" style="color:var(--red)">×</a></span>';}).join(' ');document.getElementById('shotChips').innerHTML=pendingShots.map(function(s,i){return '<span class="pill"><img src="'+s.dataUrl+'" style="height:20px;vertical-align:middle;border-radius:3px"> '+esc(s.caption||'shot')+' <a href="#" onclick="rmShot('+i+');return false" style="color:var(--red)">×</a></span>';}).join(' ');}
 function rmAsset(i){pendingAssets.splice(i,1);renderStaging();}
@@ -237,7 +351,7 @@ function evPanel(f){const opts=devices.map(d=>'<option value="'+d+'">'+d+'</opti
 function fCard(f){const controls=[];const id=f.id;
   if(hasCap('finding.curate')){if(f.state==='submitted'){controls.push('<button onclick="fAct('+Q+id+Q+','+Q+'approve'+Q+')">Approve</button>');controls.push('<button class="ghost" onclick="fAct('+Q+id+Q+','+Q+'park'+Q+')">Park</button>');controls.push('<button class="ghost" onclick="fAct('+Q+id+Q+','+Q+'reject'+Q+')">Reject</button>');}else if(f.state==='approved'){controls.push('<button class="ghost" onclick="fAct('+Q+id+Q+','+Q+'park'+Q+')">Remove from report</button>');}}
   if(canEdit(f))controls.push('<button class="ghost" onclick="toggleExp('+Q+id+Q+')">'+(expanded.has(id)?'Close':'Edit / +evidence')+'</button>');
-  const badge=f.state==='approved'?'<span class="badge b-ok">in report</span>':f.state==='submitted'?'<span class="badge b-warn">submitted</span>':'<span class="badge b-mut">'+f.state+'</span>';
+  const badge=(f.state==='approved'?'<span class="badge b-ok">in report</span>':f.state==='submitted'?'<span class="badge b-warn">submitted</span>':'<span class="badge b-mut">'+f.state+'</span>')+(f.inFormalReport?' <span class="badge b-pro">formal</span>':'');
   let ev='';
   if(f.assets&&f.assets.length)ev+='<div class="k" style="margin-top:6px">Affected: '+f.assets.map(function(a){return '<span class="pill">'+esc(a.type)+' · '+esc(a.name)+(a.ip?' · '+esc(a.ip):'')+'</span>';}).join(' ')+'</div>';
   if(f.screenshots&&f.screenshots.length)ev+='<div class="row" style="margin-top:6px">'+f.screenshots.map(function(s){return '<a href="'+s.url+'" target="_blank"><img src="'+s.url+'" title="'+esc(s.caption)+'" style="height:52px;border:1px solid var(--line);border-radius:5px"></a>';}).join('')+'</div>';
@@ -256,6 +370,129 @@ function renderAttack(q,sug){const tn={};ATT.tactics.forEach(function(t){tn[t.id
   if(sug){rows='<div class="k" style="margin:2px 0 6px">Suggested from your finding text:</div>'+(sug.length?sug.map(function(x){return trow(x,tn);}).join(''):'<div class="empty">No suggestions — try the search.</div>');}
   else{const ql=(q||'').toLowerCase();const f=ATT.techniques.filter(function(x){return !ql||x.id.toLowerCase().includes(ql)||x.name.toLowerCase().includes(ql)||(tn[x.tactic]||'').toLowerCase().includes(ql)||x.keywords.some(function(k){return k.includes(ql);});});rows=f.slice(0,60).map(function(x){return trow(x,tn);}).join('');}
   const rowsEl=document.getElementById('attackRows');if(rowsEl)rowsEl.innerHTML=rows;}
+
+// ---- case controls (status / severity / lead / export) ----
+function renderCtl(s){
+  const inv=s.investigation;const el=document.getElementById('invctl');
+  const sig=JSON.stringify([inv.status,inv.severity,inv.assigneeId,caps,s.users.map(function(u){return u.id;})]);
+  if(sig===sigC)return;sigC=sig;
+  let h='';
+  if(hasCap('tech.control')){
+    h+='<span class="k">status</span><select onchange="invUpd({status:this.value})">'+s.statuses.map(function(x){return '<option'+(inv.status===x?' selected':'')+'>'+x+'</option>';}).join('')+'</select>';
+    h+='<span class="k">severity</span><select onchange="invUpd({severity:this.value})">'+s.severities.map(function(x){return '<option'+((inv.severity||'medium')===x?' selected':'')+'>'+x+'</option>';}).join('')+'</select>';
+    h+='<span class="k">lead</span><select onchange="invUpd({assigneeId:this.value})"><option value="">unassigned</option>'+s.users.map(function(u){return '<option value="'+u.id+'"'+(inv.assigneeId===u.id?' selected':'')+'>'+esc(u.name)+' ('+u.title+')</option>';}).join('')+'</select>';
+  }else{
+    const lead=(s.users.find(function(u){return u.id===inv.assigneeId;})||{}).name;
+    h+='<span class="badge b-warn">'+esc(inv.status)+'</span><span class="badge b-mut"><span class="dot '+esc(inv.severity||'medium')+'"></span>'+esc(inv.severity||'medium')+'</span>'+(lead?'<span class="k">lead: '+esc(lead)+'</span>':'');
+  }
+  h+='<span style="flex:1"></span><button class="ghost" onclick="exportCase()">Export case bundle</button>';
+  el.innerHTML=h;
+}
+async function invUpd(patch){try{await post('/api/investigations/'+encodeURIComponent(INV)+'/update',patch);}catch(e){}sigC='';tick();}
+async function exportCase(){const r=await fetch('/api/investigations/'+encodeURIComponent(INV)+'/export');const j=await r.json();if(j.error){alert(j.error);return;}dl(INV+'.skyhawk-case.json',j);}
+
+// ---- incident timeline ----
+function setTlNow(){const d=new Date(Date.now()-new Date().getTimezoneOffset()*60000);document.getElementById('tlat').value=d.toISOString().slice(0,16);}
+function renderTimeline(s){
+  const sig=JSON.stringify(s.timeline)+caps.join(',');if(sig===sigT)return;sigT=sig;
+  document.getElementById('tlcount').textContent=s.timeline.length?('· '+s.timeline.length+' events'):'';
+  const fmap={};s.findings.forEach(function(f){fmap[f.id]=f.title;});
+  document.getElementById('tllist').innerHTML=s.timeline.length?s.timeline.map(function(e){
+    return '<div class="tlrow"><span class="mono" style="white-space:nowrap">'+new Date(e.at).toLocaleString([],{year:'2-digit',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})+'</span><span class="pill">'+esc(e.source)+'</span><span style="flex:1">'+esc(e.text)+(e.findingId&&fmap[e.findingId]?' <span class="k">('+esc(fmap[e.findingId])+')</span>':'')+'</span><span class="k">'+esc(userNameOf(e.by))+'</span>'+(hasCap('finding.create')?'<a href="#" style="color:var(--red)" onclick="tlDel('+Q+e.id+Q+');return false">×</a>':'')+'</div>';
+  }).join(''):'<div class="empty">No events yet. Reconstruct the attack chronologically — every entry lands in the technical report.</div>';
+}
+async function tlAdd(){const t=document.getElementById('tltext');if(!t.value.trim())return;const at=document.getElementById('tlat').value;await post('/api/investigations/'+encodeURIComponent(INV)+'/timeline',{text:t.value,at:at?new Date(at).toISOString():null,source:document.getElementById('tlsrc').value});t.value='';sigT='';tick();}
+async function tlDel(id){await post('/api/investigations/'+encodeURIComponent(INV)+'/timeline/'+id+'/remove');sigT='';tick();}
+
+// ---- IOC tracking ----
+function renderIocs(s){
+  const sig=JSON.stringify(s.iocs)+caps.join(',');if(sig===sigI)return;sigI=sig;
+  document.getElementById('ioccount').textContent=s.iocs.length?('· '+s.iocs.length):'';
+  const groups={};s.iocs.forEach(function(x){(groups[x.type]=groups[x.type]||[]).push(x);});
+  document.getElementById('ioclist').innerHTML=s.iocs.length?Object.keys(groups).sort().map(function(t){
+    return '<h2 style="margin-top:12px">'+esc(t)+' ('+groups[t].length+')</h2>'+groups[t].map(function(x){
+      return '<div class="iocrow"><span class="mono" style="flex:1;word-break:break-all">'+esc(x.value)+'</span>'+(x.note?'<span class="k">'+esc(x.note)+'</span>':'')+'<span class="k">'+esc(userNameOf(x.by))+'</span><button class="ghost" onclick="copyIoc('+Q+x.id+Q+',this)">copy</button>'+(hasCap('finding.create')?'<a href="#" style="color:var(--red)" onclick="iocDel('+Q+x.id+Q+');return false">×</a>':'')+'</div>';
+    }).join('');
+  }).join(''):'<div class="empty">No IOCs yet. Add indicators manually or extract them from finding text.</div>';
+}
+function copyIoc(id,btn){const x=((S&&S.iocs)||[]).find(function(i){return i.id===id;});if(!x)return;
+  function ok(){btn.textContent='copied';setTimeout(function(){btn.textContent='copy';},900);}
+  function fb(){const ta=document.createElement('textarea');ta.value=x.value;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');ok();}catch(e){}document.body.removeChild(ta);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(x.value).then(ok).catch(fb);}else fb();}
+async function iocAdd(){const v=document.getElementById('iocv');if(!v.value.trim())return;await post('/api/investigations/'+encodeURIComponent(INV)+'/iocs',{value:v.value,note:document.getElementById('iocn').value});v.value='';document.getElementById('iocn').value='';sigI='';tick();}
+async function iocDel(id){await post('/api/investigations/'+encodeURIComponent(INV)+'/iocs/'+id+'/remove');sigI='';tick();}
+async function iocExtract(){iocSugs=await post('/api/investigations/'+encodeURIComponent(INV)+'/iocs/extract');renderSugs();}
+function renderSugs(){const el=document.getElementById('iocsug');el.innerHTML=iocSugs.length?'<div class="k" style="margin-bottom:5px">Found in finding text — click to track:</div>'+iocSugs.map(function(x,i){return '<span class="pill" style="cursor:pointer;margin:2px;display:inline-block" onclick="iocPick('+i+')">+ '+esc(x.type)+' · '+esc(x.value)+'</span>';}).join(' ')+' <button class="ghost" onclick="iocPickAll()">Track all</button>':'<div class="empty">Nothing new found in finding text.</div>';}
+async function iocPick(i){const x=iocSugs.splice(i,1)[0];await postQ('/api/investigations/'+encodeURIComponent(INV)+'/iocs',{value:x.value,type:x.type,note:'extracted from findings'});renderSugs();sigI='';tick();}
+async function iocPickAll(){for(const x of iocSugs){await postQ('/api/investigations/'+encodeURIComponent(INV)+'/iocs',{value:x.value,type:x.type,note:'extracted from findings'});}iocSugs=[];renderSugs();sigI='';tick();}
+
+// ---- response checklist ----
+function renderTasks(s){
+  const sig=JSON.stringify(s.tasks)+caps.join(',');if(sig===sigK)return;sigK=sig;
+  const done=s.tasks.filter(function(t){return t.done;}).length,total=s.tasks.length;
+  document.getElementById('tkbar').style.width=(total?Math.round(done*100/total):0)+'%';
+  document.getElementById('tkpct').textContent=total?done+'/'+total+' done':'no tasks yet';
+  const phases=(s.phases||[]);
+  document.getElementById('tklist').innerHTML=total?phases.map(function(ph){
+    const rows=s.tasks.filter(function(t){return t.phase===ph;});if(!rows.length)return'';
+    return '<h2 style="margin-top:12px">'+esc(ph)+'</h2>'+rows.map(function(t){
+      return '<div class="tkrow'+(t.done?' done':'')+'"><input type="checkbox"'+(t.done?' checked':'')+(hasCap('finding.create')?'':' disabled')+' onchange="tkToggle('+Q+t.id+Q+')"><span class="tktext" style="flex:1">'+esc(t.text)+'</span>'+(t.done&&t.doneBy?'<span class="k">'+esc(userNameOf(t.doneBy))+'</span>':'')+(hasCap('finding.create')?'<a href="#" style="color:var(--red)" onclick="tkDel('+Q+t.id+Q+');return false">×</a>':'')+'</div>';
+    }).join('');
+  }).join(''):'<div class="empty">No tasks yet. Apply an incident playbook or add your own.</div>';
+}
+async function tkAdd(){const t=document.getElementById('tktext');if(!t.value.trim())return;await post('/api/investigations/'+encodeURIComponent(INV)+'/tasks',{text:t.value,phase:document.getElementById('tkphase').value});t.value='';sigK='';tick();}
+async function tkTpl(){await post('/api/investigations/'+encodeURIComponent(INV)+'/tasks',{template:document.getElementById('tktpl').value});sigK='';tick();}
+async function tkToggle(id){await post('/api/investigations/'+encodeURIComponent(INV)+'/tasks/'+id+'/toggle');sigK='';tick();}
+async function tkDel(id){await post('/api/investigations/'+encodeURIComponent(INV)+'/tasks/'+id+'/remove');sigK='';tick();}
+
+// ---- report modes + formal compose ----
+function setRMode(m2){rmode=m2;['technical','formal'].forEach(function(x){document.getElementById('rt-'+x).classList.toggle('on',x===rmode);});document.getElementById('formalPane').style.display=rmode==='formal'?'block':'none';refreshReport();}
+function refreshReport(){const u='/investigations/'+encodeURIComponent(INV)+'/report/'+rmode;document.getElementById('rlink').href=u;document.getElementById('rnote').textContent=rmode==='technical'?'— live technical report':'— formal report (immutable signed snapshot once finalized)';document.getElementById('rframe').src=u+'?ts='+Date.now();sigFm='';if(S)renderFormalCompose(S);}
+function refreshFrame(){document.getElementById('rframe').src='/investigations/'+encodeURIComponent(INV)+'/report/'+rmode+'?ts='+Date.now();}
+function renderFormalCompose(s){
+  if(rmode!=='formal')return;
+  const inv=s.investigation;
+  const sig=JSON.stringify([s.findings.map(function(f){return [f.id,f.state,f.inFormal,f.formalSummary];}),inv.formalFrozen&&inv.formalFrozen.version,inv.execSummary,inv.scope,inv.remediation,caps]);
+  if(sig===sigFm)return;sigFm=sig;
+  document.getElementById('fzbanner').innerHTML=inv.formalFrozen
+    ?'<div class="card" style="border-color:var(--green)"><span class="badge b-ok">FROZEN v'+inv.formalFrozen.version+'</span> signed by <b>'+esc(inv.formalFrozen.frozenBy)+'</b> · '+new Date(inv.formalFrozen.frozenAt).toLocaleString()+(hasCap('formal.finalize')?' <span class="k">— re-finalize below to publish a new signed version</span>':'')+'</div>'
+    :'<div class="card" style="border-color:var(--amber)"><span class="badge b-warn">DRAFT</span> <span class="k">not yet finalized — an MC freezes &amp; signs it below</span></div>';
+  const box=document.getElementById('formalCompose');
+  if(!hasCap('finding.curate')){box.innerHTML='';return;}
+  const appr=s.findings.filter(function(f){return f.state==='approved';});
+  let h='<div class="card"><h2 style="margin-top:0">Compose — flag findings &amp; write plain-language summaries</h2>';
+  h+=appr.length?appr.map(function(f){
+    return '<div class="card" style="background:var(--bg)"><label class="row" style="cursor:pointer"><input type="checkbox"'+(f.inFormal?' checked':'')+' onchange="fFormal('+Q+f.id+Q+',this.checked)"><b>'+esc(f.title)+'</b>'+(f.inFormalReport?'<span class="badge b-ok">in formal</span>':f.inFormal?'<span class="badge b-warn">needs summary</span>':'')+'</label>'
+      +(f.inFormal?'<textarea id="fsum-'+f.id+'" style="width:100%;min-height:44px;margin-top:6px" placeholder="Plain-language summary for executives (no analyst names, no raw tech)">'+esc(f.formalSummary||'')+'</textarea><div class="row" style="margin-top:6px"><button class="ghost" onclick="fSummary('+Q+f.id+Q+')">Save summary</button><button class="ghost" onclick="fDraft('+Q+f.id+Q+')">Draft for me (offline)</button></div>':'')
+      +'</div>';
+  }).join(''):'<div class="empty">No approved findings yet — approve findings on the Findings tab first.</div>';
+  h+='<h2>Narrative</h2>';
+  h+='<div class="k" style="margin-bottom:4px">Executive summary</div><textarea id="nExec" style="width:100%;min-height:44px;margin-bottom:8px">'+esc(inv.execSummary||'')+'</textarea>';
+  h+='<div class="k" style="margin-bottom:4px">Scope &amp; impact</div><textarea id="nScope" style="width:100%;min-height:44px;margin-bottom:8px">'+esc(inv.scope||'')+'</textarea>';
+  h+='<div class="k" style="margin-bottom:4px">Remediation &amp; recommendations</div><textarea id="nRem" style="width:100%;min-height:44px;margin-bottom:8px">'+esc(inv.remediation||'')+'</textarea>';
+  h+='<div class="row"><button class="ghost" onclick="saveNarr()">Save narrative</button>'+(hasCap('formal.finalize')?'<button onclick="finalizeNow()">'+(inv.formalFrozen?'Re-finalize (v'+(inv.formalFrozen.version+1)+')':'Finalize &amp; sign')+'</button>':'<span class="k">Only an MC can finalize &amp; sign.</span>')+'</div></div>';
+  box.innerHTML=h;
+}
+async function fFormal(id,inc){try{await post('/api/findings/'+id+'/formal',{include:inc});}catch(e){}sigFm='';sigF='';await tick();refreshFrame();}
+async function fSummary(id){await post('/api/findings/'+id+'/summary',{text:document.getElementById('fsum-'+id).value});sigFm='';sigF='';await tick();refreshFrame();}
+async function fDraft(id){const j=await post('/api/findings/'+id+'/draft');const ta=document.getElementById('fsum-'+id);if(ta)ta.value=j.text||'';}
+async function saveNarr(){await post('/api/investigations/'+encodeURIComponent(INV)+'/update',{execSummary:document.getElementById('nExec').value,scope:document.getElementById('nScope').value,remediation:document.getElementById('nRem').value});sigFm='';await tick();refreshFrame();}
+async function finalizeNow(){if(!confirm('Freeze & sign the formal report? This creates an immutable signed snapshot.'))return;await post('/api/investigations/'+encodeURIComponent(INV)+'/finalize',{});sigFm='';await tick();refreshFrame();}
+
+// ---- audit chain viewer ----
+async function loadAudit(){
+  const r=await fetch('/api/investigations/'+encodeURIComponent(INV)+'/audit');const j=await r.json();if(j.error)return;
+  document.getElementById('auditBadge').innerHTML=j.intact?'<span class="badge b-ok">chain intact ✓</span>':'<span class="badge b-red">CHAIN BROKEN — tampering detected</span>';
+  document.getElementById('auditMeta').textContent=j.events.length+' events · verified '+new Date().toLocaleTimeString();
+  document.getElementById('auditList').innerHTML=j.events.slice().reverse().map(function(e){
+    return '<div class="iocrow"><span class="mono" style="color:var(--mut)">#'+e.seq+'</span><span class="mono" style="white-space:nowrap">'+new Date(e.timestamp).toLocaleString()+'</span><b style="min-width:90px">'+esc(e.actorName)+'</b><span class="pill">'+esc(e.action)+'</span><span class="k" style="flex:1;word-break:break-all">'+esc(e.targetId)+'</span><span class="mono" title="'+esc(e.hash)+'" style="color:var(--mut)">'+esc((e.hash||'').slice(0,10))+'…</span></div>';
+  }).join('')||'<div class="empty">No events recorded yet.</div>';
+}
+function initSelects(s){
+  document.getElementById('tlsrc').innerHTML=s.tlSources.map(function(x){return '<option>'+esc(x)+'</option>';}).join('');
+  document.getElementById('tktpl').innerHTML=s.playbooks.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('');
+  document.getElementById('tkphase').innerHTML=s.phases.map(function(x){return '<option>'+esc(x)+'</option>';}).join('');
+}
 
 const ZONES=[{n:'External',x0:0,x1:225},{n:'DMZ',x0:225,x1:470},{n:'Internal',x0:470,x1:700},{n:'Restricted',x0:700,x1:900}];
 const zoneX=[110,345,585,800];
@@ -297,13 +534,15 @@ async function mSave(quiet){try{await post('/api/investigations/'+encodeURICompo
 async function tick(){
   const sr=await fetch('/api/investigations/'+encodeURIComponent(INV)+'/state?me='+encodeURIComponent(uid));if(sr.status===401){localStorage.clear();location.href='/login';return;}const s=await sr.json();
   if(s.error){document.querySelector('.wrap').innerHTML='<p>'+s.error+'</p><a href="/">← Portfolio</a>';return;}
-  caps=s.me.caps;lastFindings=s.findings;
+  S=s;caps=s.me.caps;lastFindings=s.findings;
   document.getElementById('ititle').textContent=s.investigation.id+' · '+s.investigation.title;
-  document.getElementById('imeta').textContent='status '+s.investigation.status;
+  document.getElementById('imeta').textContent=(s.investigation.createdAt?'opened '+new Date(s.investigation.createdAt).toLocaleDateString()+' · ':'')+s.findings.length+' findings · '+s.iocs.length+' IOCs · '+s.timeline.length+' timeline events';
   if(!devices.length){devices=await (await fetch('/api/devices')).json();const o=devices.map(function(d){return '<option value="'+d+'">'+d+'</option>';}).join('');document.getElementById('adtype').innerHTML=o;document.getElementById('adtype2').innerHTML=o;}
+  if(!selsInit){initSelects(s);selsInit=true;}
   document.getElementById('nf').textContent=s.findings.length;document.getElementById('tc').textContent=s.technicalCount;
   const sf=JSON.stringify(s.findings)+[...expanded].join(',')+caps.join(',');
   if(sf!==sigF){sigF=sf;document.getElementById('board').innerHTML=s.findings.length?s.findings.map(fCard).join(''):'<div class="empty">No findings yet.</div>';}
+  renderCtl(s);renderTimeline(s);renderIocs(s);renderTasks(s);renderFormalCompose(s);
   if(!mLoaded){mNodes=(s.map&&s.map.nodes)||[];mEdges=(s.map&&s.map.edges)||[];mLoaded=true;if(document.getElementById('p-map').classList.contains('on'))mRender();}
 }
 tick();setInterval(tick,4000);
@@ -334,14 +573,21 @@ function report(kind, d) {
     const findings = (d.findingsRaw || []).filter((f) => f.inTechnical);
     const body = findings.length ? findings.map((f) => {
       const assets = (f.assets && f.assets.length) ? `<div class="print" style="margin:4px 0"><b>Affected systems:</b> ${f.assets.map((a) => `${esc(a.type)} — ${esc(a.name)}${a.ip ? " (" + esc(a.ip) + ")" : ""}`).join("; ")}</div>` : "";
-      const shots = (f.screenshots || []).map((sc) => `<figure style="margin:8px 0"><img src="${sc.url}" style="max-width:100%;border:1px solid #ccc;border-radius:4px"><figcaption class="by">${esc(sc.caption)}</figcaption></figure>`).join("");
+      const shots = (f.screenshots || []).map((sc) => `<figure style="margin:8px 0"><img src="${sc.url}" style="max-width:100%;border:1px solid #ccc;border-radius:4px"><figcaption class="by">${esc(sc.caption)}${sc.sha256 ? ` · sha256 <span style="font-family:ui-monospace,monospace">${esc(sc.sha256)}</span>` : ""}</figcaption></figure>`).join("");
       const tools = (f.tools && f.tools.length) ? `<div class="print" style="margin:4px 0"><b>Tools used:</b> ${f.tools.map(esc).join(", ")}</div>` : "";
       const queries = (f.queries || []).map((qy) => `<div class="tech"><b>${esc(qy.lang)}</b><br>${esc(qy.text)}</div>`).join("");
       return `<div class="f"><div class="t">${esc(f.title)} ${(f.attack || []).map((a) => `<span class="pill">${esc(a)}</span>`).join(" ")}</div><div class="by">Logged by ${esc(f.by || f.authorId)} · severity ${esc(f.severity)}</div><div class="tech">${esc(f.technicalDetail)}</div>${assets}${shots}${queries ? `<div class="print" style="margin-top:6px"><b>Queries</b></div>${queries}` : ""}${tools}</div>`;
     }).join("") : `<p class="mut">No approved findings yet.</p>`;
+    const timeline = (d.timeline && d.timeline.length) ? `<h2>Incident timeline</h2>` + d.timeline.map((e) =>
+      `<div class="print" style="margin:4px 0"><b style="font-family:ui-monospace,monospace">${esc(new Date(e.at).toISOString().slice(0, 16).replace("T", " "))}Z</b> <span class="pill">${esc(e.source)}</span> ${esc(e.text)}</div>`).join("") : "";
+    const iocGroups = {};
+    (d.iocs || []).forEach((x) => { (iocGroups[x.type] = iocGroups[x.type] || []).push(x); });
+    const iocs = (d.iocs && d.iocs.length) ? `<h2>Indicators of compromise (${d.iocs.length})</h2>` + Object.keys(iocGroups).sort().map((t) =>
+      `<div class="print" style="margin:6px 0"><b>${esc(t)}</b>${iocGroups[t].map((x) => `<div class="tech" style="margin-top:3px">${esc(x.value)}${x.note ? ` <span class="mut">— ${esc(x.note)}</span>` : ""}</div>`).join("")}</div>`).join("") : "";
     return head + `<div class="banner">LIVE — regenerates as findings change. Internal / restricted.</div>` +
       (inv.execSummary ? `<h2>Executive summary</h2><p>${esc(inv.execSummary)}</p>` : "") +
-      `<h2>Findings (${findings.length})</h2>${body}` + attack +
+      timeline +
+      `<h2>Findings (${findings.length})</h2>${body}` + attack + iocs +
       (inv.remediation ? `<h2>Remediation</h2><p>${esc(inv.remediation)}</p>` : "") + `</body></html>`;
   }
   if (inv.formalFrozen) {

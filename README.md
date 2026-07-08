@@ -86,17 +86,40 @@ New users can self-register and pick a title.
 - **Role-based access** (NCM / HCM / TC / MC) with real authentication - hashed
   passwords (scrypt) and server-side sessions; identity comes from the session,
   not the client.
-- **Tabbed workspace** - Findings, Network map, and Report tabs.
-- **Findings with full evidence** - affected systems (typed devices), screenshots,
-  verbatim queries, tools used; editable after creation. Approved findings appear
-  in the technical report.
+- **Tabbed workspace** - Findings, Timeline, IOCs, Tasks, Network map, Report and
+  Audit tabs.
+- **Case lifecycle** - status workflow (open → contained → eradicated → recovered
+  → closed), case severity, and a case lead, all controlled by TC/MC and shown on
+  the portfolio.
+- **Findings with full evidence** - affected systems (typed devices), screenshots
+  (SHA-256 hashed on upload for integrity), verbatim queries, tools used; editable
+  after creation. Approved findings appear in the technical report.
+- **Incident timeline** - reconstruct the attack chronologically (time, source,
+  event); rendered into the technical report.
+- **IOC tracking** - indicators auto-typed (IP, domain, URL, email, MD5/SHA-1/
+  SHA-256, CVE, path), one-click **extraction from finding text**, copy buttons,
+  and an IOC appendix in the technical report.
+- **Response checklists** - offline PICERL playbooks (ransomware, BEC, malware,
+  generic) plus custom tasks, with per-phase grouping and a progress bar.
 - **Editable network map** - a full drag-and-drop builder for the whole
   environment: add/link/position devices, set compromise state, edit IPs. Findings
   can seed it ("Sync from findings"), but you own it. Saved per investigation.
 - **MITRE ATT&CK helper** - a searchable offline cheat sheet plus a keyword
   suggester ("Suggest from finding") so analysts don't need to know technique IDs.
-- **Technical report** - live, full, credited; printable to PDF.
-- **Tamper-evident audit chain**, persisted and re-verified after restart.
+- **Technical report** - live, full, credited; printable to PDF. Now includes the
+  incident timeline, IOC appendix and evidence hashes.
+- **Formal report workflow** - leads flag approved findings into the formal
+  report and write plain-language summaries (with a fully offline draft
+  assistant); an MC freezes & signs an immutable, versioned snapshot. Analyst
+  names and raw technical detail are excluded by policy.
+- **Tamper-evident audit chain**, persisted and re-verified after restart - now
+  with an in-app Audit tab showing the verified hash chain per case.
+- **Case bundles (air-gap transfer)** - export a whole investigation (findings,
+  evidence images, timeline, IOCs, tasks, audit chain) as one JSON file and
+  import it on another SKYHAWK instance; the audit chain is re-verified on import.
+- **Full backup** - one-click MC-only JSON dump of every collection.
+- **Global search** - one box searches case IDs/titles, finding text and IOC
+  values across all investigations.
 - **Team chat** - a shared Team channel plus private DMs, all history saved, with unread badges/alerts.
 - **Appearance** - per-account theme (4 palettes) + hawk mark, saved to the account.
 - **Store seam** - file by default; Postgres with one env flip (`STORE=postgres`).
