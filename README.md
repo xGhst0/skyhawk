@@ -30,6 +30,26 @@ irm https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 | iex
 
 <sub>Windows with curl instead: `curl.exe -L https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 -o install.ps1 && powershell -ExecutionPolicy Bypass -File install.ps1`</sub>
 
+### Air-gapped target (Ubuntu / Linux box with NO internet)
+
+On any machine **with** internet, build a fully self-contained bundle — SKYHAWK
+plus the Node.js runtime, i.e. everything it needs, checksum-verified:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xGhst0/skyhawk/main/bundle-airgap.sh | bash
+```
+
+Carry the resulting `skyhawk-airgap-linux-x64.tar.gz` (~46 MB) across on
+removable media, then on the air-gapped machine:
+
+```bash
+tar -xzf skyhawk-airgap-linux-x64.tar.gz && ./skyhawk-airgap/run.sh
+```
+
+That's it — no internet, no `apt`, no `npm`, no installs. The app has zero npm
+dependencies, so the bundle's Node runtime is the *only* dependency and it ships
+inside the tarball. For an ARM target build with `ARCH=arm64`.
+
 The installer ensures Node.js 18+ is present (installs it if missing - `nvm` on
 Linux/macOS, `winget` on Windows), downloads SKYHAWK, and **starts it as a
 background service on port 8462** - it keeps running after you close the terminal
