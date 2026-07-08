@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SKYHAWK one-command installer (Linux / macOS)
-#   curl -fsSL https://raw.githubusercontent.com/YOURUSER/skyhawk/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.sh | bash
 set -euo pipefail
 
-REPO="${SKYHAWK_REPO:-https://github.com/YOURUSER/skyhawk}"   # <-- set to your repo
+REPO="${SKYHAWK_REPO:-https://github.com/xGhst0/skyhawk}"
 DIR="${SKYHAWK_DIR:-$HOME/skyhawk}"
 PORT="${PORT:-8462}"
 

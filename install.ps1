@@ -1,7 +1,7 @@
 # SKYHAWK one-command installer (Windows PowerShell)
-#   powershell -c "irm https://raw.githubusercontent.com/YOURUSER/skyhawk/main/install.ps1 | iex"
+#   powershell -c "irm https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 | iex"
 $ErrorActionPreference = "Stop"
-$Repo = if ($env:SKYHAWK_REPO) { $env:SKYHAWK_REPO } else { "https://github.com/YOURUSER/skyhawk" }  # <-- set to your repo
+$Repo = if ($env:SKYHAWK_REPO) { $env:SKYHAWK_REPO } else { "https://github.com/xGhst0/skyhawk" }
 $Dir  = if ($env:SKYHAWK_DIR)  { $env:SKYHAWK_DIR }  else { "$env:USERPROFILE\skyhawk" }
 $Port = if ($env:PORT) { $env:PORT } else { "8462" }
 
