@@ -1,0 +1,9 @@
+{
+  "name": "skyhawk",
+  "version": "1.0.0",
+  "description": "Air-gapped investigation-to-report platform for blue-team analyst teams",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "private": true
+}

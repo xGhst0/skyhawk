@@ -1,0 +1,5 @@
+node_modules
+skyhawk-data.json
+skyhawk.log
+evidence/
+*.log
