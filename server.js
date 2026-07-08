@@ -168,7 +168,7 @@ async function portfolio() {
   const out = [];
   for (const inv of await listInv()) {
     const recs = await recordsFor(inv.id);
-    out.push({ id: inv.id, title: inv.title, status: inv.status, findings: recs.length, technical: recs.filter((r) => r.state === "approved").length });
+    out.push({ id: inv.id, title: inv.title, status: inv.status, findings: recs.length, technical: recs.filter((r) => r.state === "approved").length, formal: recs.filter((r) => r.state === "approved" && r.inFormal && (r.formalSummary || "").length > 0).length });
   }
   return out;
 }
