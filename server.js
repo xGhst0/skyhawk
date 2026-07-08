@@ -76,7 +76,7 @@ function saveShot(fid, i, dataUrl, caption) {
 }
 function collectEvidence(b) {
   const screenshots = (b.screenshots || []).map((sc, i) => saveShot(b._fid, i, sc.dataUrl, sc.caption)).filter(Boolean);
-  const assets = (b.assets || []).filter((a) => a && a.name).map((a) => ({ type: a.type || "host", name: String(a.name).slice(0, 80) }));
+  const assets = (b.assets || []).filter((a) => a && a.name).map((a) => ({ type: a.type || "host", name: String(a.name).slice(0, 80), ip: a.ip ? String(a.ip).slice(0, 60) : "" }));
   const queries = (b.queries || []).filter((qy) => qy && qy.text).map((qy) => ({ lang: (qy.lang || "query").slice(0, 20), text: String(qy.text).slice(0, 4000) }));
   const tools = (b.tools || []).map((t) => String(t).slice(0, 60)).filter(Boolean);
   return { screenshots, assets, queries, tools };
