@@ -31,8 +31,13 @@ irm https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 | iex
 <sub>Windows with curl instead: `curl.exe -L https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 -o install.ps1 && powershell -ExecutionPolicy Bypass -File install.ps1`</sub>
 
 The installer ensures Node.js 18+ is present (installs it if missing - `nvm` on
-Linux/macOS, `winget` on Windows), downloads SKYHAWK, and starts it. When it's up
-it opens **http://localhost:8462**.
+Linux/macOS, `winget` on Windows), downloads SKYHAWK, and **starts it as a
+background service on port 8462** - it keeps running after you close the terminal
+and **restarts on boot/logon**. When it's up it opens **http://localhost:8462**.
+
+- Linux/macOS: a `systemd --user` service (falls back to `nohup` + an `@reboot`
+  cron entry if systemd isn't available).
+- Windows: a Scheduled Task that runs at logon (and it starts immediately).
 
 ### Already have Node.js? Clone and go
 
@@ -44,6 +49,24 @@ node server.js        # or: npm start
 There is **nothing to build and nothing to `npm install`** - the app is plain
 Node using only built-in modules.
 
+## Managing the service
+
+**Linux / macOS**
+```bash
+systemctl --user status skyhawk      # is it running?
+systemctl --user restart skyhawk     # restart
+systemctl --user stop skyhawk        # stop
+systemctl --user disable --now skyhawk   # uninstall the service
+# (nohup fallback) stop with:  pkill -f skyhawk/server.js
+```
+
+**Windows (PowerShell)**
+```powershell
+Get-ScheduledTask SKYHAWK            # is it registered?
+Stop-ScheduledTask -TaskName SKYHAWK; Get-Process node | Stop-Process   # stop
+Unregister-ScheduledTask -TaskName SKYHAWK -Confirm:$false              # uninstall
+```
+
 ## First sign-in
 
 The sign-in screen is seeded with accounts (password `skyhawk` - **change these in
@@ -51,8 +74,8 @@ production**):
 
 | Name | Title | Role |
 |------|-------|------|
-| Morgan | MC | manager - full control, incl. freezing the formal report |
-| Chen | TC | team lead - technical report + edit any finding |
+| Morgan | MC | manager - full control |
+| Chen | TC | team lead - controls the technical report, can edit any finding |
 | Rivera | NCM | member - create/edit own findings |
 | Patel | HCM | member - create/edit own findings |
 
@@ -63,13 +86,18 @@ New users can self-register and pick a title.
 - **Role-based access** (NCM / HCM / TC / MC) with real authentication - hashed
   passwords (scrypt) and server-side sessions; identity comes from the session,
   not the client.
+- **Tabbed workspace** - Findings, Network map, and Report tabs.
 - **Findings with full evidence** - affected systems (typed devices), screenshots,
-  verbatim queries, tools used; editable after creation.
-- **Network map** auto-built from the affected systems tagged on findings.
-- **Reports** - live technical (full, credited) and frozen, signed formal
-  (curated, anonymous); printable to PDF.
+  verbatim queries, tools used; editable after creation. Approved findings appear
+  in the technical report.
+- **Editable network map** - a full drag-and-drop builder for the whole
+  environment: add/link/position devices, set compromise state, edit IPs. Findings
+  can seed it ("Sync from findings"), but you own it. Saved per investigation.
+- **MITRE ATT&CK helper** - a searchable offline cheat sheet plus a keyword
+  suggester ("Suggest from finding") so analysts don't need to know technique IDs.
+- **Technical report** - live, full, credited; printable to PDF.
 - **Tamper-evident audit chain**, persisted and re-verified after restart.
-- **Team chat** - a shared Team channel plus private DMs, all history saved.
+- **Team chat** - a shared Team channel plus private DMs, all history saved, with unread badges/alerts.
 - **Appearance** - per-account theme (4 palettes) + hawk mark, saved to the account.
 - **Store seam** - file by default; Postgres with one env flip (`STORE=postgres`).
 - **Structured logging** to console + `skyhawk.log`.
@@ -82,6 +110,7 @@ New users can self-register and pick a title.
 | `STORE` | `file` | `file` or `postgres` |
 | `DATABASE_URL` | - | required when `STORE=postgres` (needs `npm i pg`) |
 | `DEBUG` | - | set to `1` for verbose request logs |
+| `TLS_CERT` / `TLS_KEY` | - | paths to a cert + key; when both are set SKYHAWK serves **HTTPS** and the session cookie becomes `Secure` |
 
 ## Run it as a service (optional)
 
@@ -100,12 +129,32 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
-## Security notes
+## HTTPS (TLS)
 
-Runs offline by design; the only published port is the API. For a hardened
-production deployment: put it behind TLS (add `Secure` to the session cookie),
-add login rate-limiting, change the seeded passwords, and - if using Postgres -
-load-test that path first.
+Generate a local self-signed cert and run over HTTPS:
+
+```bash
+./gen-cert.sh
+TLS_CERT=cert.pem TLS_KEY=key.pem node server.js   # serves https://localhost:8462
+```
+
+In production, point `TLS_CERT`/`TLS_KEY` at a real certificate (or terminate TLS
+at a reverse proxy). When TLS is on, the session cookie is issued with `Secure`
+in addition to `HttpOnly` and `SameSite=Strict`.
+
+## Security
+
+- **Runs offline** - the only published port is the app; no telemetry, no cloud.
+- **Auth** - scrypt-hashed passwords, HttpOnly server-side session cookies;
+  identity is taken from the session, never trusted from the client.
+- **Login rate-limiting** - 5 failed attempts per IP+name triggers a 15-minute
+  lockout (returns HTTP 429).
+- **Tamper-evident audit chain** per investigation, persisted and re-verified.
+- Change the seeded passwords before any real use.
+
+The `PostgresStore` path has been validated at the SQL level (create/upsert/
+select/delete) against an in-process Postgres engine; run your own load test
+against your Postgres before production.
 
 ## License
 

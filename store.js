@@ -20,7 +20,11 @@ class FileStore {
 
 // Same interface, backed by Postgres (jsonb kv). Needs `npm i pg` + a DATABASE_URL.
 class PostgresStore {
-  constructor(url) { const { Pool } = require("pg"); this.pool = new Pool({ connectionString: url }); this.ready = this._init(); }
+  constructor(urlOrPool) {
+    if (urlOrPool && typeof urlOrPool.query === "function") { this.pool = urlOrPool; }        // injected pool (tests)
+    else { const { Pool } = require("pg"); this.pool = new Pool({ connectionString: urlOrPool }); }
+    this.ready = this._init();
+  }
   async _init() { await this.pool.query("create table if not exists kv (coll text, id text, val jsonb, primary key (coll,id))"); }
   async all(coll) { await this.ready; const r = await this.pool.query("select val from kv where coll=$1", [coll]); return r.rows.map((x) => x.val); }
   async get(coll, id) { await this.ready; const r = await this.pool.query("select val from kv where coll=$1 and id=$2", [coll, id]); return r.rows[0]?.val || null; }

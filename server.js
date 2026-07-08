@@ -6,12 +6,15 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const https = require("https");
 const log = require("./logger.js");
 const { makeStore } = require("./store.js");
 const { Finding, User, Role, TechnicalPolicy, FormalPolicy, Report, AuditLog, OfflineDraftAssist } = require("./domain/index.js");
 const pages = require("./pages.js");
+const attack = require("./attack.js");
 
 const PORT = process.env.PORT || 8462;
+const useTLS = !!(process.env.TLS_CERT && process.env.TLS_KEY);
 const store = makeStore(log);
 const assist = new OfflineDraftAssist();
 const EVID = path.join(__dirname, "evidence");
@@ -150,23 +153,22 @@ async function finalizeFormal(invId, b) {
 async function stateFor(invId, meId) {
   const inv = await getInv(invId);
   const recs = await recordsFor(invId);
-  const view = recs.map((r) => ({ ...r, by: userName(r.authorId), authorId: r.authorId, inTechnical: r.state === "approved", inFormal: r.state === "approved" && r.inFormal && !!(r.formalSummary && r.formalSummary.length) }));
+  const view = recs.map((r) => ({ ...r, by: userName(r.authorId), authorId: r.authorId, inTechnical: r.state === "approved" }));
   const audit = await auditFor(invId);
   const me = userById(meId);
-  return { investigation: inv, devices: DEVICE_TYPES, findings: view, technicalCount: view.filter((f) => f.inTechnical).length, formalCount: view.filter((f) => f.inFormal).length, audit: { intact: audit.verify(), events: audit.all().length }, finalized: inv.formalFrozen, me: { id: me.id, name: me.name, title: me.title, caps: capsFor(me.title), prefs: me.prefs || { theme: "monolith", mark: "head" } } };
+  return { investigation: inv, devices: DEVICE_TYPES, findings: view, technicalCount: view.filter((f) => f.inTechnical).length, map: inv.map || { nodes: [], edges: [] }, audit: { intact: audit.verify(), events: audit.all().length }, me: { id: me.id, name: me.name, title: me.title, caps: capsFor(me.title), prefs: me.prefs || { theme: "monolith", mark: "strike" } } };
 }
 async function reportData(invId) {
   const inv = await getInv(invId);
   const recs = (await recordsFor(invId)).map((r) => ({ ...r, by: userName(r.authorId), attackTechniques: r.attack || [], inTechnical: r.state === "approved" }));
   const attack = [...new Set(recs.filter((r) => r.inTechnical).flatMap((r) => r.attack || []))];
-  const formalLive = new Report(invId, new FormalPolicy(), userName).render(recs.map(hydrate));
-  return { inv, findingsRaw: recs, formalLive, attack };
+  return { inv, findingsRaw: recs, attack };
 }
 async function portfolio() {
   const out = [];
   for (const inv of await listInv()) {
     const recs = await recordsFor(inv.id);
-    out.push({ id: inv.id, title: inv.title, status: inv.status, findings: recs.length, technical: recs.filter((r) => r.state === "approved").length, formal: recs.filter((r) => r.state === "approved" && r.inFormal && r.formalSummary).length, finalized: !!inv.formalFrozen });
+    out.push({ id: inv.id, title: inv.title, status: inv.status, findings: recs.length, technical: recs.filter((r) => r.state === "approved").length });
   }
   return out;
 }
@@ -194,9 +196,17 @@ let SESSIONS = new Map();
 async function loadSessions() { (await store.all("sessions")).forEach((x) => SESSIONS.set(x.token, x.userId)); }
 async function newSession(userId) { const token = crypto.randomBytes(24).toString("hex"); SESSIONS.set(token, userId); await store.put("sessions", { id: token, token, userId, ts: Date.now() }); return token; }
 async function dropSession(token) { SESSIONS.delete(token); await store.remove("sessions", token); }
-const cookie = (tok) => `sky_sid=${tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`;
+const cookie = (tok) => `sky_sid=${tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${useTLS ? "; Secure" : ""}`;
 function parseCookie(req) { const c = req.headers.cookie || ""; const m = /(?:^|; )sky_sid=([^;]+)/.exec(c); return m ? m[1] : null; }
 function actorOf(req) { const t = parseCookie(req); if (!t) return null; const uid = SESSIONS.get(t); if (!uid) return null; return USERS.get(uid) || null; }
+
+// ---------- login rate limiting (per IP + name) ----------
+const LOGIN_ATTEMPTS = new Map();
+const RL_MAX = 5, RL_WINDOW = 15 * 60000, RL_LOCK = 15 * 60000;
+function rlKey(req, name) { const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim(); return ip + "|" + String(name || "").toLowerCase(); }
+function rlBlocked(key) { const e = LOGIN_ATTEMPTS.get(key); if (e && e.lockUntil && Date.now() < e.lockUntil) return Math.ceil((e.lockUntil - Date.now()) / 1000); return 0; }
+function rlFail(key) { const now = Date.now(); let e = LOGIN_ATTEMPTS.get(key); if (!e || now - e.first > RL_WINDOW) e = { count: 0, first: now, lockUntil: 0 }; e.count++; if (e.count >= RL_MAX) { e.lockUntil = now + RL_LOCK; log.warn("login.locked", { key }); } LOGIN_ATTEMPTS.set(key, e); }
+function rlReset(key) { LOGIN_ATTEMPTS.delete(key); }
 
 // ---------- local chat (team channel + DMs; persisted) ----------
 async function chatChannels(meId) {
@@ -205,6 +215,11 @@ async function chatChannels(meId) {
 }
 function dmOk(channel, meId) { if (channel === "team") return true; if (channel.startsWith("dm:")) return channel.slice(3).split("~").includes(meId); return false; }
 async function chatMessages(channel) { const all = await store.all("messages"); return all.filter((m) => m.channel === channel).sort((a, b) => a.ts - b.ts).slice(-300).map((m) => ({ ...m, fromName: userName(m.from) })); }
+async function chatSummary(meId) {
+  const all = await store.all("messages"); const chans = await chatChannels(meId); const last = {};
+  for (const m of all) { if (!last[m.channel] || last[m.channel].ts < m.ts) last[m.channel] = { ts: m.ts, from: m.from }; }
+  return chans.map((c) => ({ id: c.id, name: c.name, dm: !!c.dm, lastTs: last[c.id] ? last[c.id].ts : 0, lastFrom: last[c.id] ? last[c.id].from : null }));
+}
 async function chatSend(b) {
   const actor = userById(b.actorId); const channel = b.channel || "team";
   if (!dmOk(channel, actor.id)) throw new Error("not a member of this channel");
@@ -218,14 +233,21 @@ async function chatSend(b) {
 const send = (res, code, body, type = "application/json") => { res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store" }); res.end(typeof body === "string" ? body : JSON.stringify(body, null, 2)); };
 const readBodyRaw = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => { try { r(JSON.parse(d || "{}")); } catch { r({}); } }); });
 
-const server = http.createServer(async (req, res) => {
+const handler = async (req, res) => {
   const t0 = Date.now(); const url = new URL(req.url, "http://localhost"); const p = url.pathname; const q = url.searchParams;
   res.on("finish", () => log.debug("req", { m: req.method, p, s: res.statusCode, ms: Date.now() - t0 }));
   const actor = actorOf(req);
   const rb = async () => { const b = await readBodyRaw(req); if (actor) b.actorId = actor.id; return b; };
   const isReport = /^\/investigations\/[^/]+\/report\//.test(p);
   if (p === "/api/auth/register" && req.method === "POST") { try { const b = await readBodyRaw(req); const u = await createUser(b); const tok = await newSession(u.id); res.writeHead(201, { "Content-Type": "application/json", "Set-Cookie": cookie(tok) }); return res.end(JSON.stringify(pub(u))); } catch (e) { return send(res, 400, { error: String(e.message || e) }); } }
-  if (p === "/api/auth/login" && req.method === "POST") { const b = await readBodyRaw(req); const u = [...USERS.values()].find((x) => x.name.toLowerCase() === (b.name || "").toLowerCase()); if (!u || !verifyPw(b.password || "", u)) return send(res, 401, { error: "invalid name or password" }); const tok = await newSession(u.id); res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": cookie(tok) }); return res.end(JSON.stringify(pub(u))); }
+  if (p === "/api/auth/login" && req.method === "POST") {
+    const b = await readBodyRaw(req); const key = rlKey(req, b.name);
+    const wait = rlBlocked(key); if (wait) return send(res, 429, { error: "too many attempts — wait " + wait + "s" });
+    const u = [...USERS.values()].find((x) => x.name.toLowerCase() === (b.name || "").toLowerCase());
+    if (!u || !verifyPw(b.password || "", u)) { rlFail(key); return send(res, 401, { error: "invalid name or password" }); }
+    rlReset(key); const tok = await newSession(u.id);
+    res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": cookie(tok) }); return res.end(JSON.stringify(pub(u)));
+  }
   if (p === "/api/auth/logout" && req.method === "POST") { const t = parseCookie(req); if (t) await dropSession(t); res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": "sky_sid=; Path=/; Max-Age=0" }); return res.end("{}"); }
   if (p === "/api/me") return actor ? send(res, 200, { ...pub(actor), caps: capsFor(actor.title) }) : send(res, 401, { error: "not signed in" });
   const needsAuth = isReport || p.startsWith("/evidence/") || p.startsWith("/api/");
@@ -235,7 +257,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/login") return send(res, 200, pages.login(), "text/html");
     if (p === "/inv") return send(res, 200, pages.workspace(q.get("id")), "text/html");
     let rm;
-    if ((rm = p.match(/^\/investigations\/([^/]+)\/report\/(technical|formal)$/))) { const d = await reportData(rm[1]); return send(res, 200, pages.report(rm[2], d), "text/html"); }
+    if ((rm = p.match(/^\/investigations\/([^/]+)\/report\/technical$/))) { const d = await reportData(rm[1]); return send(res, 200, pages.report("technical", d), "text/html"); }
     if (p === "/favicon.svg" || p === "/favicon.ico") return send(res, 200, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="26" fill="#0B0D10"/><g fill="#5EEAD4"><path d=\"M58 32 C58 27 70 27 70 32 C70 39 66 43 64 48 C62 43 58 39 58 32 Z\"/><path d=\"M64 44 L60 54 L64 50 L68 54 Z\"/><path d=\"M60 48 L59 70 L69 70 L68 48 Z\"/><path d=\"M60 50 L16 28 L30 47 L47 51 L58 62 Z\"/><path d=\"M68 50 L112 28 L98 47 L81 51 L70 62 Z\"/><path d=\"M64 68 L60 90 L64 84 L68 90 Z\"/><path d=\"M60 68 L50 84 L42 88 L49 88 L44 94 L52 90 L50 97 L56 89 L63 70 Z\"/><path d=\"M68 68 L78 84 L86 88 L79 88 L84 94 L76 90 L78 97 L72 89 L65 70 Z\"/></g></svg>', "image/svg+xml");
     if (p === "/api/devices") return send(res, 200, DEVICE_TYPES);
     if (p === "/api/users" && req.method === "GET") return send(res, 200, [...USERS.values()].map(pub));
@@ -257,18 +279,20 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/investigations" && req.method === "POST") return send(res, 201, await createInv(await rb()));
     let m;
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/state$/))) return send(res, 200, await stateFor(m[1], actor.id));
-    if ((m = p.match(/^\/api\/investigations\/([^/]+)\/finalize$/)) && req.method === "POST") return send(res, 200, await finalizeFormal(m[1], await rb()));
+    if ((m = p.match(/^\/api\/investigations\/([^/]+)\/map$/)) && req.method === "POST") { requireCap(actor.id, "finding.create"); const b = await rb(); const inv = await getInv(m[1]); inv.map = { nodes: Array.isArray(b.nodes) ? b.nodes : [], edges: Array.isArray(b.edges) ? b.edges : [] }; await store.put("investigations", inv); log.info("map.saved", { inv: m[1], nodes: inv.map.nodes.length }); return send(res, 200, inv.map); }
+    if (p === "/api/attack") return send(res, 200, { tactics: attack.tactics, techniques: attack.techniques });
+    if (p === "/api/attack/suggest" && req.method === "POST") { const b = await rb(); return send(res, 200, attack.suggest(b.text || "")); }
+    if (p === "/api/chat/summary") return send(res, 200, await chatSummary(actor.id));
     if (p === "/api/findings" && req.method === "POST") return send(res, 201, await addFinding(await rb()));
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/edit$/)) && req.method === "POST") return send(res, 200, await editFinding(m[1], await rb()));
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/evidence$/)) && req.method === "POST") return send(res, 200, await addEvidence(m[1], await rb()));
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/approve$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => { if (f.state === "submitted") f.beginReview(domainLead); f.approve(domainLead); }, "finding.approved"))); }
-    if ((m = p.match(/^\/api\/findings\/([^/]+)\/formal$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => f.setIncludeInFormal(domainLead, !!b.include), "finding.formal"))); }
-    if ((m = p.match(/^\/api\/findings\/([^/]+)\/summary$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => f.writeFormalSummary(domainLead, b.text || ""), "finding.summary"))); }
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/park$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => f.park(domainLead), "finding.parked"))); }
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/reject$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => f.reject(domainLead), "finding.rejected"))); }
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/draft$/)) && req.method === "POST") { const rec = await store.get("findings", m[1]); if (!rec) throw new Error("not found"); return send(res, 200, { text: assist.draftFormalSummary(hydrate(rec)) }); }
     send(res, 404, { error: "not found" });
   } catch (e) { const code = e.code === 403 ? 403 : 400; log.warn("request.error", { p, err: String(e.message || e) }); send(res, code, { error: String(e.message || e) }); }
-});
+};
+const server = useTLS ? https.createServer({ cert: fs.readFileSync(process.env.TLS_CERT), key: fs.readFileSync(process.env.TLS_KEY) }, handler) : http.createServer(handler);
 
-loadUsers().then(loadSessions).then(seedIfEmpty).then(() => server.listen(PORT, () => log.info("listening", { url: `http://localhost:${PORT}`, store: process.env.STORE || "file" })));
+loadUsers().then(loadSessions).then(seedIfEmpty).then(() => server.listen(PORT, () => log.info("listening", { url: `${useTLS ? "https" : "http"}://localhost:${PORT}`, store: process.env.STORE || "file", tls: useTLS })));
