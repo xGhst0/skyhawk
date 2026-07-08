@@ -16,21 +16,19 @@ Runs entirely on `localhost` / your LAN. No internet. No database required.
 
 ## Install & run (one command)
 
-> Replace `YOURUSER/skyhawk` with your GitHub repo path.
-
 **Linux / macOS**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOURUSER/skyhawk/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/YOURUSER/skyhawk/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 | iex
 ```
 
-<sub>Windows with curl instead: `curl.exe -L https://raw.githubusercontent.com/YOURUSER/skyhawk/main/install.ps1 -o install.ps1 && powershell -ExecutionPolicy Bypass -File install.ps1`</sub>
+<sub>Windows with curl instead: `curl.exe -L https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 -o install.ps1 && powershell -ExecutionPolicy Bypass -File install.ps1`</sub>
 
 The installer ensures Node.js 18+ is present (installs it if missing — `nvm` on
 Linux/macOS, `winget` on Windows), downloads SKYHAWK, and starts it. When it's up
@@ -39,7 +37,7 @@ it opens **http://localhost:8462**.
 ### Already have Node.js? Clone and go
 
 ```bash
-git clone https://github.com/YOURUSER/skyhawk && cd skyhawk
+git clone https://github.com/xGhst0/skyhawk && cd skyhawk
 node server.js        # or: npm start
 ```
 
