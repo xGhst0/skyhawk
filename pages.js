@@ -245,7 +245,9 @@ function fCard(f){const controls=[];const id=f.id;
   if(f.queries&&f.queries.length)ev+='<div class="k" style="margin-top:6px">'+f.queries.length+' query(ies) captured</div>';
   return '<div class="card fnd '+f.state+'"><div><span class="dot '+f.severity+'"></span><b>'+esc(f.title)+'</b> '+badge+'<div class="k" style="margin-top:3px">'+esc(f.by)+' · '+(f.attack||[]).map(function(a){return '<span class="pill">'+esc(a)+'</span>';}).join(' ')+'</div></div>'+ev+(controls.length?'<div class="row" style="margin-top:9px">'+controls.join('')+'</div>':'')+(expanded.has(id)?evPanel(f):'')+'</div>';}
 
-async function openAttack(){if(!ATT)ATT=await (await fetch('/api/attack')).json();renderAttack('');}
+async function openAttack(){if(!ATT)ATT=await (await fetch('/api/attack')).json();
+  document.getElementById('attackModal').innerHTML='<div class="modal" onclick="if(event.target===this)closeAttack()"><div class="modalbox"><div class="row" style="justify-content:space-between;margin-bottom:8px"><b>MITRE ATT&CK helper</b><a href="#" onclick="closeAttack();return false" class="k">close</a></div><div class="row" style="margin-bottom:8px"><input class="t" placeholder="Search technique / tactic / keyword" oninput="renderAttack(this.value)"><button class="ghost" onclick="attackSuggestNow()">Suggest from finding</button></div><div id="attackRows"></div><div class="k" style="margin-top:8px">Click a technique to add its ID to the finding.</div></div></div>';
+  renderAttack('');}
 function closeAttack(){document.getElementById('attackModal').innerHTML='';}
 async function attackSuggestNow(){const text=document.getElementById('ftitle').value+' '+document.getElementById('fdetail').value;const sug=await (await fetch('/api/attack/suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})).json();renderAttack('',sug);}
 function pickTech(tid){const el=document.getElementById('fattack');const cur=el.value.split(',').map(x=>x.trim()).filter(Boolean);if(!cur.includes(tid))cur.push(tid);el.value=cur.join(', ');closeAttack();}
@@ -253,7 +255,7 @@ function trow(x,tn){return '<div class="trow" onclick="pickTech('+Q+x.id+Q+')"><
 function renderAttack(q,sug){const tn={};ATT.tactics.forEach(function(t){tn[t.id]=t.name;});let rows;
   if(sug){rows='<div class="k" style="margin:2px 0 6px">Suggested from your finding text:</div>'+(sug.length?sug.map(function(x){return trow(x,tn);}).join(''):'<div class="empty">No suggestions — try the search.</div>');}
   else{const ql=(q||'').toLowerCase();const f=ATT.techniques.filter(function(x){return !ql||x.id.toLowerCase().includes(ql)||x.name.toLowerCase().includes(ql)||(tn[x.tactic]||'').toLowerCase().includes(ql)||x.keywords.some(function(k){return k.includes(ql);});});rows=f.slice(0,60).map(function(x){return trow(x,tn);}).join('');}
-  document.getElementById('attackModal').innerHTML='<div class="modal" onclick="if(event.target===this)closeAttack()"><div class="modalbox"><div class="row" style="justify-content:space-between;margin-bottom:8px"><b>MITRE ATT&CK helper</b><a href="#" onclick="closeAttack();return false" class="k">close</a></div><div class="row" style="margin-bottom:8px"><input class="t" placeholder="Search technique / tactic / keyword" oninput="renderAttack(this.value)"><button class="ghost" onclick="attackSuggestNow()">Suggest from finding</button></div><div>'+rows+'</div><div class="k" style="margin-top:8px">Click a technique to add its ID to the finding.</div></div></div>';}
+  const rowsEl=document.getElementById('attackRows');if(rowsEl)rowsEl.innerHTML=rows;}
 
 const ZONES=[{n:'External',x0:0,x1:225},{n:'DMZ',x0:225,x1:470},{n:'Internal',x0:470,x1:700},{n:'Restricted',x0:700,x1:900}];
 const zoneX=[110,345,585,800];
