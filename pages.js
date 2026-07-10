@@ -115,10 +115,10 @@ function login() {
 <div class="row" style="margin-bottom:8px"><input id="rname" class="t" placeholder="Name"><select id="rtitle" style="width:150px" onchange="desc()"></select></div>
 <div class="row"><input id="rpw" type="password" class="t" placeholder="Password"><button onclick="register()">Create</button></div>
 <div class="k" id="titledesc" style="margin-top:6px"></div></div>
-<div class="foot">Seeded accounts: Morgan (MC), Chen (TC), Rivera (NCM), Patel (HCM) — password <code>skyhawk</code>. Change these in production.</div>
+<div class="foot">Seeded accounts: Morgan (Manager), Chen (Tech Lead), Rivera (Analyst), Patel (Analyst) — password <code>skyhawk</code>. Change these in production.</div>
 </div>
 <script>
-const TITLES={NCM:'NCM — create & edit your own findings.',HCM:'HCM — create & edit your own findings.',TC:'TC (team lead) — control the technical report + edit any finding.',MC:'MC (manager) — full control incl. freezing the formal report.'};
+const TITLES={'Analyst':'Analyst — create & edit your own findings.','Tech Lead':'Tech Lead — control the technical report + edit any finding.','Manager':'Manager — full control incl. freezing & signing the formal report.'};
 document.getElementById('rtitle').innerHTML=Object.keys(TITLES).map(k=>'<option value="'+k+'">'+k+'</option>').join('');
 function desc(){document.getElementById('titledesc').textContent=TITLES[document.getElementById('rtitle').value]||'';}
 desc();
@@ -196,7 +196,7 @@ async function impCase(inp){
     alert('Imported as '+j.id+(j.chainIntact?' — audit chain intact':' — WARNING: audit chain did not verify'));load();
   }catch(e){alert('Not a valid SKYHAWK bundle: '+e.message);}
 }
-async function initMe(){try{const me=await (await fetch('/api/me')).json();myCaps=me.caps||[];if(myCaps.indexOf('user.manage')>=0){document.getElementById('adminrow').innerHTML='<button class="ghost" onclick="document.getElementById(\\'impfile\\').click()">Import case bundle</button><button class="ghost" onclick="dlBackup()">Download full backup</button><span class="k">MC only — case bundles move investigations between air-gapped enclaves.</span>';}}catch(e){}}
+async function initMe(){try{const me=await (await fetch('/api/me')).json();myCaps=me.caps||[];if(myCaps.indexOf('user.manage')>=0){document.getElementById('adminrow').innerHTML='<button class="ghost" onclick="document.getElementById(\\'impfile\\').click()">Import case bundle</button><button class="ghost" onclick="dlBackup()">Download full backup</button><span class="k">Manager only — case bundles move investigations between air-gapped enclaves.</span>';}}catch(e){}}
 initMe();
 async function load(){
   const h=await (await fetch('/health')).json();document.getElementById('store').textContent='store: '+h.store;
@@ -456,7 +456,7 @@ function renderFormalCompose(s){
   if(sig===sigFm)return;sigFm=sig;
   document.getElementById('fzbanner').innerHTML=inv.formalFrozen
     ?'<div class="card" style="border-color:var(--green)"><span class="badge b-ok">FROZEN v'+inv.formalFrozen.version+'</span> signed by <b>'+esc(inv.formalFrozen.frozenBy)+'</b> · '+new Date(inv.formalFrozen.frozenAt).toLocaleString()+(hasCap('formal.finalize')?' <span class="k">— re-finalize below to publish a new signed version</span>':'')+'</div>'
-    :'<div class="card" style="border-color:var(--amber)"><span class="badge b-warn">DRAFT</span> <span class="k">not yet finalized — an MC freezes &amp; signs it below</span></div>';
+    :'<div class="card" style="border-color:var(--amber)"><span class="badge b-warn">DRAFT</span> <span class="k">not yet finalized — a Manager freezes &amp; signs it below</span></div>';
   const box=document.getElementById('formalCompose');
   if(!hasCap('finding.curate')){box.innerHTML='';return;}
   const appr=s.findings.filter(function(f){return f.state==='approved';});
@@ -470,7 +470,7 @@ function renderFormalCompose(s){
   h+='<div class="k" style="margin-bottom:4px">Executive summary</div><textarea id="nExec" style="width:100%;min-height:44px;margin-bottom:8px">'+esc(inv.execSummary||'')+'</textarea>';
   h+='<div class="k" style="margin-bottom:4px">Scope &amp; impact</div><textarea id="nScope" style="width:100%;min-height:44px;margin-bottom:8px">'+esc(inv.scope||'')+'</textarea>';
   h+='<div class="k" style="margin-bottom:4px">Remediation &amp; recommendations</div><textarea id="nRem" style="width:100%;min-height:44px;margin-bottom:8px">'+esc(inv.remediation||'')+'</textarea>';
-  h+='<div class="row"><button class="ghost" onclick="saveNarr()">Save narrative</button>'+(hasCap('formal.finalize')?'<button onclick="finalizeNow()">'+(inv.formalFrozen?'Re-finalize (v'+(inv.formalFrozen.version+1)+')':'Finalize &amp; sign')+'</button>':'<span class="k">Only an MC can finalize &amp; sign.</span>')+'</div></div>';
+  h+='<div class="row"><button class="ghost" onclick="saveNarr()">Save narrative</button>'+(hasCap('formal.finalize')?'<button onclick="finalizeNow()">'+(inv.formalFrozen?'Re-finalize (v'+(inv.formalFrozen.version+1)+')':'Finalize &amp; sign')+'</button>':'<span class="k">Only a Manager can finalize &amp; sign.</span>')+'</div></div>';
   box.innerHTML=h;
 }
 async function fFormal(id,inc){try{await post('/api/findings/'+id+'/formal',{include:inc});}catch(e){}sigFm='';sigF='';await tick();refreshFrame();}
@@ -602,7 +602,7 @@ function report(kind, d) {
   }
   const live = d.formalLive;
   const body = live.length ? live.map((b) => `<div class="f"><div class="t">${esc(b.title)}</div><p>${esc(b.body || "&lt;summary not written&gt;")}</p></div>`).join("") : `<p class="mut">No findings flagged into the formal report yet.</p>`;
-  return head + `<div class="banner">DRAFT — not finalized. An MC finalizes in the workspace to freeze and sign.</div><h2>What happened</h2>${body}</body></html>`;
+  return head + `<div class="banner">DRAFT — not finalized. A Manager finalizes in the workspace to freeze and sign.</div><h2>What happened</h2>${body}</body></html>`;
 }
 
 module.exports = { login, portfolio, workspace, report };

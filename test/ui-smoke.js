@@ -39,7 +39,7 @@ async function loadPage(path,cookie,seed){
 (async()=>{
   const login=await raw('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Morgan',password:'skyhawk'})});
   const cookie=(login.headers['set-cookie']||[''])[0].split(';')[0];
-  const seed={hs_uid:'U-MC',hs_name:'Morgan',hs_title:'MC'};
+  const seed={hs_uid:'U-MC',hs_name:'Morgan',hs_title:'Manager'};
   let fails=0;
   const ck=(name,cond,extra)=>{console.log((cond?'  OK   ':'  FAIL ')+name+(extra&&!cond?' — '+extra:''));if(!cond)fails++;};
 
@@ -94,7 +94,7 @@ async function loadPage(path,cookie,seed){
   const mine=cards.find(c=>c.textContent.includes('Harness test finding'));
   ck('new finding appears on board', !!mine);
   const approveBtn=mine&&[...mine.querySelectorAll('button')].find(b=>/Approve/.test(b.textContent));
-  ck('Approve button present (MC curate)', !!approveBtn);
+  ck('Approve button present (Manager curate)', !!approveBtn);
   ck('Approve onclick wired to fAct', approveBtn&&approveBtn.getAttribute('onclick').includes('fAct'));
   // actually click it
   if(approveBtn){ approveBtn.click(); await sleep(500); }
@@ -112,21 +112,21 @@ async function loadPage(path,cookie,seed){
 
   ck('no errors after interactions', errors.length===0, errors.join(' || '));
 
-  // ---- ROLE ENFORCEMENT (NCM) ----
-  console.log('\n== role enforcement: NCM (Rivera) ==');
+  // ---- ROLE ENFORCEMENT (Analyst) ----
+  console.log('\n== role enforcement: Analyst (Rivera) ==');
   const nlogin=await raw('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Rivera',password:'skyhawk'})});
   const ncookie=(nlogin.headers['set-cookie']||[''])[0].split(';')[0];
-  const R=await loadPage('/inv?id=INC-2043',ncookie,{hs_uid:'U-NCM',hs_name:'Rivera',hs_title:'NCM'});
+  const R=await loadPage('/inv?id=INC-2043',ncookie,{hs_uid:'U-NCM',hs_name:'Rivera',hs_title:'Analyst'});
   await sleep(600);
-  ck('NCM: no JS errors', R.errors.length===0, R.errors.join(' || '));
-  ck('NCM lacks curate cap', R.win.eval('caps.indexOf("finding.curate")')===-1);
-  R.win.document.getElementById('ftitle').value='NCM submitted finding';
+  ck('Analyst: no JS errors', R.errors.length===0, R.errors.join(' || '));
+  ck('Analyst lacks curate cap', R.win.eval('caps.indexOf("finding.curate")')===-1);
+  R.win.document.getElementById('ftitle').value='Analyst submitted finding';
   await R.win.addF(); await sleep(500);
   const rcards=[...R.win.document.querySelectorAll('#board .fnd')];
-  const rmine=rcards.find(c=>c.textContent.includes('NCM submitted finding'));
-  ck('NCM finding shows on board', !!rmine);
+  const rmine=rcards.find(c=>c.textContent.includes('Analyst submitted finding'));
+  ck('Analyst finding shows on board', !!rmine);
   const hasApprove=rmine&&[...rmine.querySelectorAll('button')].some(b=>/Approve/.test(b.textContent));
-  ck('NCM does NOT see an Approve button', !hasApprove);
+  ck('Analyst does NOT see an Approve button', !hasApprove);
 
   // ---- PORTFOLIO ----
   console.log('\n== portfolio page ==');

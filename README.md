@@ -94,23 +94,23 @@ production**):
 
 | Name | Title | Role |
 |------|-------|------|
-| Morgan | MC | manager - full control |
-| Chen | TC | team lead - controls the technical report, can edit any finding |
-| Rivera | NCM | member - create/edit own findings |
-| Patel | HCM | member - create/edit own findings |
+| Morgan | Manager | full control incl. freezing & signing the formal report |
+| Chen | Tech Lead | controls the technical report, can edit any finding |
+| Rivera | Analyst | create/edit own findings |
+| Patel | Analyst | create/edit own findings |
 
 New users can self-register and pick a title.
 
 ## What it does
 
-- **Role-based access** (NCM / HCM / TC / MC) with real authentication - hashed
-  passwords (scrypt) and server-side sessions; identity comes from the session,
-  not the client.
+- **Role-based access** (Analyst / Tech Lead / Manager) with real authentication -
+  hashed passwords (scrypt) and server-side sessions; identity comes from the
+  session, not the client.
 - **Tabbed workspace** - Findings, Timeline, IOCs, Tasks, Network map, Report and
   Audit tabs.
 - **Case lifecycle** - status workflow (open → contained → eradicated → recovered
-  → closed), case severity, and a case lead, all controlled by TC/MC and shown on
-  the portfolio.
+  → closed), case severity, and a case lead, all controlled by Tech Leads /
+  Managers and shown on the portfolio.
 - **Findings with full evidence** - affected systems (typed devices), screenshots
   (SHA-256 hashed on upload for integrity), verbatim queries, tools used; editable
   after creation. Approved findings appear in the technical report.
@@ -130,14 +130,14 @@ New users can self-register and pick a title.
   incident timeline, IOC appendix and evidence hashes.
 - **Formal report workflow** - leads flag approved findings into the formal
   report and write plain-language summaries (with a fully offline draft
-  assistant); an MC freezes & signs an immutable, versioned snapshot. Analyst
+  assistant); a Manager freezes & signs an immutable, versioned snapshot. Analyst
   names and raw technical detail are excluded by policy.
 - **Tamper-evident audit chain**, persisted and re-verified after restart - now
   with an in-app Audit tab showing the verified hash chain per case.
 - **Case bundles (air-gap transfer)** - export a whole investigation (findings,
   evidence images, timeline, IOCs, tasks, audit chain) as one JSON file and
   import it on another SKYHAWK instance; the audit chain is re-verified on import.
-- **Full backup** - one-click MC-only JSON dump of every collection.
+- **Full backup** - one-click Manager-only JSON dump of every collection.
 - **Global search** - one box searches case IDs/titles, finding text and IOC
   values across all investigations.
 - **Team chat** - a shared Team channel plus private DMs, all history saved, with unread badges/alerts.

@@ -1,5 +1,5 @@
 // Skyhawk — air-gapped investigation-to-report platform (runnable build).
-// Roles (NCM/HCM/TC/MC) · findings with full evidence + network map · live
+// Roles (Analyst/Tech Lead/Manager) · findings with full evidence + network map · live
 // technical & frozen formal reports · persisted tamper-evident audit ·
 // Store seam (file|postgres) · logging. No internet. Run: node server.js
 const http = require("http");
@@ -26,12 +26,16 @@ const SEVERITIES = ["critical", "high", "medium", "low"];
 const mkId = (p) => p + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 // ---------- roles / permissions ----------
-const TITLES = { NCM: "NCM", HCM: "HCM", TC: "TC (team lead)", MC: "MC (manager)" };
+const TITLES = { "Analyst": "Analyst", "Tech Lead": "Tech Lead", "Manager": "Manager" };
+const LEGACY_TITLES = { NCM: "Analyst", HCM: "Analyst", TC: "Tech Lead", MC: "Manager" };
 const CAP = {
-  NCM: ["finding.create", "finding.editOwn"],
-  HCM: ["finding.create", "finding.editOwn"],
-  TC: ["finding.create", "finding.editOwn", "finding.editAny", "finding.curate", "tech.control"],
-  MC: ["finding.create", "finding.editOwn", "finding.editAny", "finding.curate", "tech.control", "formal.finalize", "user.manage"],
+  "Analyst": ["finding.create", "finding.editOwn"],
+  "Tech Lead": ["finding.create", "finding.editOwn", "finding.editAny", "finding.curate", "tech.control"],
+  "Manager": ["finding.create", "finding.editOwn", "finding.editAny", "finding.curate", "tech.control", "formal.finalize", "user.manage"],
+};
+const canonTitle = (raw) => {
+  const t = String(raw || "").trim();
+  return Object.keys(TITLES).find((k) => k.toLowerCase() === t.toLowerCase()) || LEGACY_TITLES[t.toUpperCase()] || null;
 };
 const can = (title, cap) => (CAP[title] || []).includes(cap);
 const capsFor = (title) => CAP[title] || [];
@@ -41,21 +45,25 @@ let USERS = new Map();
 async function loadUsers() {
   const arr = await store.all("users");
   if (!arr.length) {
-    const seed = [ { id: "U-MC", name: "Morgan", title: "MC" }, { id: "U-TC", name: "Chen", title: "TC" }, { id: "U-NCM", name: "Rivera", title: "NCM" }, { id: "U-HCM", name: "Patel", title: "HCM" } ];
+    const seed = [ { id: "U-MC", name: "Morgan", title: "Manager" }, { id: "U-TC", name: "Chen", title: "Tech Lead" }, { id: "U-NCM", name: "Rivera", title: "Analyst" }, { id: "U-HCM", name: "Patel", title: "Analyst" } ];
     for (const s0 of seed) { const pw = hashPw("skyhawk"); const u = { ...s0, prefs: { theme: "monolith", mark: "strike" }, salt: pw.salt, hash: pw.hash }; await store.put("users", u); USERS.set(u.id, u); }
-  } else arr.forEach((u) => USERS.set(u.id, u));
+  } else for (const u of arr) {
+    // migrate pre-rename titles (NCM/HCM -> Analyst, TC -> Tech Lead, MC -> Manager)
+    if (LEGACY_TITLES[u.title]) { u.title = LEGACY_TITLES[u.title]; await store.put("users", u); log.info("user.title.migrated", { id: u.id, title: u.title }); }
+    USERS.set(u.id, u);
+  }
 }
 async function createUser(b) {
-  const name = (b.name || "").trim(); const title = (b.title || "").toUpperCase();
+  const name = (b.name || "").trim(); const title = canonTitle(b.title);
   if (!name) throw new Error("name required");
-  if (!TITLES[title]) throw new Error("title must be NCM, HCM, TC or MC");
+  if (!title) throw new Error("title must be Analyst, Tech Lead or Manager");
   const existing = [...USERS.values()].find((u) => u.name.toLowerCase() === name.toLowerCase() && u.title === title);
   if (existing) return existing;
   const pw = hashPw(b.password || "skyhawk"); const u = { id: "U-" + Date.now().toString(36), name, title, prefs: { theme: "monolith", mark: "strike" }, salt: pw.salt, hash: pw.hash };
   await store.put("users", u); USERS.set(u.id, u); log.info("user.created", { id: u.id, title });
   return u;
 }
-const userById = (id) => USERS.get(id) || { id, name: id, title: "NCM" };
+const userById = (id) => USERS.get(id) || { id, name: id, title: "Analyst" };
 const userName = (id) => userById(id).name;
 function requireCap(actorId, cap) {
   const u = userById(actorId); if (!can(u.title, cap)) { const e = new Error("permission denied: " + u.title + " lacks " + cap); e.code = 403; throw e; }
@@ -541,7 +549,7 @@ const handler = async (req, res) => {
     if (p === "/api/devices") return send(res, 200, DEVICE_TYPES);
     if (p === "/api/users" && req.method === "GET") return send(res, 200, [...USERS.values()].map(pub));
     if (p === "/api/users" && req.method === "POST") { requireCap(actor.id, "user.manage"); return send(res, 201, pub(await createUser(await rb()))); }
-    { let mm; if ((mm = p.match(/^\/api\/users\/([^/]+)\/prefs$/)) && req.method === "POST") { if (mm[1] !== actor.id && actor.title !== "MC") return send(res, 403, { error: "can only change your own appearance" }); const b = await rb(); const u = USERS.get(mm[1]); if (!u) return send(res, 404, { error: "not found" }); u.prefs = { theme: b.theme || "monolith", mark: b.mark || "strike" }; await store.put("users", u); USERS.set(u.id, u); log.info("prefs.saved", { id: u.id, theme: u.prefs.theme }); return send(res, 200, pub(u)); } }
+    { let mm; if ((mm = p.match(/^\/api\/users\/([^/]+)\/prefs$/)) && req.method === "POST") { if (mm[1] !== actor.id && !can(actor.title, "user.manage")) return send(res, 403, { error: "can only change your own appearance" }); const b = await rb(); const u = USERS.get(mm[1]); if (!u) return send(res, 404, { error: "not found" }); u.prefs = { theme: b.theme || "monolith", mark: b.mark || "strike" }; await store.put("users", u); USERS.set(u.id, u); log.info("prefs.saved", { id: u.id, theme: u.prefs.theme }); return send(res, 200, pub(u)); } }
     if (p === "/api/titles") return send(res, 200, TITLES);
     if (p.startsWith("/evidence/")) {
       const name = path.basename(p.slice(10)); const fp = path.join(EVID, name);
