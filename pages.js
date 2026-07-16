@@ -76,6 +76,19 @@ button.on{background:var(--accent);border-color:var(--accent);color:var(--accent
 .filterchip{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);background:var(--bg);color:var(--mut);cursor:pointer}
 .filterchip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .srchres{border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-bottom:5px;background:var(--card);font-size:13px}
+.modalbox.wide{width:760px}
+.advsec{margin:14px 0 4px;font-weight:600;display:flex;align-items:center;gap:8px}
+.advsec .n{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:20px;padding:0 7px}
+.advitem{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:8px;background:var(--card)}
+.advitem .h{display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+.advitem .txt{font-weight:500}
+.advitem .plat{font-size:10px;color:var(--mut);border:1px solid var(--line);border-radius:20px;padding:1px 7px;white-space:nowrap}
+.advitem .why{color:var(--mut);font-size:12px;margin-top:3px}
+.cmdwrap{position:relative;margin-top:7px}
+.cmd{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px;white-space:pre-wrap;word-break:break-word;overflow-x:auto;color:var(--txt)}
+.cmd .c{color:var(--mut)}
+.cmdcopy{position:absolute;top:6px;right:6px;font-size:11px;padding:3px 8px;background:var(--card);color:var(--mut);border:1px solid var(--line)}
+.phase-triage{color:var(--signal)}.phase-contain{color:var(--red)}.phase-eradicate{color:var(--amber)}.phase-recover{color:var(--green)}.phase-block{color:var(--red)}.phase-harden{color:var(--accent)}
 </style>`;
 
 const PREFJS = `
@@ -306,6 +319,7 @@ function workspace(id) {
 </div>
 ${CHATHTML}
 <div id="attackModal"></div>
+<div id="adviceModal"></div>
 <script>
 const INV=${JSON.stringify(id)};
 ${PREFJS}
@@ -350,6 +364,7 @@ function evPanel(f){const opts=devices.map(d=>'<option value="'+d+'">'+d+'</opti
   return '<div class="card" style="margin-top:8px;background:var(--bg)"><div class="k" style="margin-bottom:4px">Edit</div><div class="row" style="margin-bottom:6px"><input id="ed-title-'+id+'" class="t" value="'+esc(f.title)+'"><select id="ed-sev-'+id+'" style="width:100px">'+['critical','high','medium','low'].map(function(s){return '<option'+(f.severity===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select><input id="ed-attack-'+id+'" style="width:140px" value="'+esc((f.attack||[]).join(', '))+'"></div><textarea id="ed-detail-'+id+'" style="width:100%;min-height:44px;margin-bottom:6px">'+esc(f.technicalDetail)+'</textarea><button class="ghost" onclick="saveEdit('+Q+id+Q+')">Save edits</button><div class="k" style="margin:10px 0 4px">Add evidence</div><div class="row" style="margin-bottom:6px"><select id="ev-type-'+id+'" style="width:170px">'+opts+'</select><input id="ev-name-'+id+'" placeholder="Name" style="flex:1;min-width:100px"><input id="ev-ip-'+id+'" placeholder="IP (optional)" style="width:110px"><button class="ghost" onclick="evAsset('+Q+id+Q+')">+ asset</button></div><div class="row" style="margin-bottom:6px"><input id="ev-cap-'+id+'" placeholder="screenshot caption" style="flex:1;min-width:120px"><input type="file" id="ev-shot-'+id+'" accept="image/*"><button class="ghost" onclick="evShot('+Q+id+Q+')">+ screenshot</button></div><div class="row"><input id="ev-tool-'+id+'" placeholder="tools (comma-separated)" style="flex:1;min-width:120px"><button class="ghost" onclick="evTool('+Q+id+Q+')">+ tools</button></div></div>';}
 function fCard(f){const controls=[];const id=f.id;
   if(hasCap('finding.curate')){if(f.state==='submitted'){controls.push('<button onclick="fAct('+Q+id+Q+','+Q+'approve'+Q+')">Approve</button>');controls.push('<button class="ghost" onclick="fAct('+Q+id+Q+','+Q+'park'+Q+')">Park</button>');controls.push('<button class="ghost" onclick="fAct('+Q+id+Q+','+Q+'reject'+Q+')">Reject</button>');}else if(f.state==='approved'){controls.push('<button class="ghost" onclick="fAct('+Q+id+Q+','+Q+'park'+Q+')">Remove from report</button>');}}
+  controls.push('<button class="ghost" onclick="openAdvice('+Q+id+Q+')">⚡ Advice</button>');
   if(canEdit(f))controls.push('<button class="ghost" onclick="toggleExp('+Q+id+Q+')">'+(expanded.has(id)?'Close':'Edit / +evidence')+'</button>');
   const badge=(f.state==='approved'?'<span class="badge b-ok">in report</span>':f.state==='submitted'?'<span class="badge b-warn">submitted</span>':'<span class="badge b-mut">'+f.state+'</span>')+(f.inFormalReport?' <span class="badge b-pro">formal</span>':'');
   let ev='';
@@ -370,6 +385,38 @@ function renderAttack(q,sug){const tn={};ATT.tactics.forEach(function(t){tn[t.id
   if(sug){rows='<div class="k" style="margin:2px 0 6px">Suggested from your finding text:</div>'+(sug.length?sug.map(function(x){return trow(x,tn);}).join(''):'<div class="empty">No suggestions — try the search.</div>');}
   else{const ql=(q||'').toLowerCase();const f=ATT.techniques.filter(function(x){return !ql||x.id.toLowerCase().includes(ql)||x.name.toLowerCase().includes(ql)||(tn[x.tactic]||'').toLowerCase().includes(ql)||x.keywords.some(function(k){return k.includes(ql);});});rows=f.slice(0,60).map(function(x){return trow(x,tn);}).join('');}
   const rowsEl=document.getElementById('attackRows');if(rowsEl)rowsEl.innerHTML=rows;}
+
+// ---- response advisor (offline, copy-pasteable remediation) ----
+let advCmds=[];
+function highlightCmd(s){return esc(s).split(String.fromCharCode(10)).map(function(l){return /^\\s*(#|!|REM\\b)/.test(l)?'<span class="c">'+l+'</span>':l;}).join(String.fromCharCode(10));}
+async function openAdvice(id){
+  document.getElementById('adviceModal').innerHTML='<div class="modal"><div class="modalbox wide"><div class="row" style="justify-content:space-between"><b>Loading response plan…</b><a href="#" onclick="closeAdvice();return false" class="k">close</a></div></div></div>';
+  let d;try{d=await (await fetch('/api/findings/'+encodeURIComponent(id)+'/advice')).json();}catch(e){d={error:'could not load advice'};}
+  renderAdvice(d);
+}
+function closeAdvice(){document.getElementById('adviceModal').innerHTML='';}
+function copyCmd(i,btn){var t=advCmds[i]||'';function ok(){var o=btn.textContent;btn.textContent='copied ✓';setTimeout(function(){btn.textContent=o;},1000);}
+  function fb(){var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');ok();}catch(e){}document.body.removeChild(ta);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok).catch(fb);}else fb();}
+function renderAdvice(d){
+  advCmds=[];
+  if(d.error){document.getElementById('adviceModal').innerHTML='<div class="modal" onclick="if(event.target===this)closeAdvice()"><div class="modalbox"><b>'+esc(d.error)+'</b> <a href="#" onclick="closeAdvice();return false" class="k">close</a></div></div>';return;}
+  var hosts=(d.hosts||[]).filter(function(h){return h.host;}).map(function(h){return esc(h.host)+(h.ip?' ('+esc(h.ip)+')':'');}).join(', ');
+  var pills=(d.matched||[]).map(function(t){return '<span class="pill">'+esc(t.id)+(t.name?' · '+esc(t.name):'')+'</span>';}).join(' ');
+  var head='<div class="row" style="justify-content:space-between;margin-bottom:6px"><b>⚡ Response plan — '+esc(d.title)+'</b><a href="#" onclick="closeAdvice();return false" class="k">close</a></div>';
+  head+='<div class="k" style="margin-bottom:4px">'+(hosts?'Targeting: '+hosts:'No systems attached to this finding.')+(d.attackerIp?' · attacker IP '+esc(d.attackerIp):'')+'</div>';
+  head+=pills?'<div style="margin-bottom:6px">'+pills+'</div>':'';
+  head+='<div class="k" style="margin-bottom:8px">Offline guidance — review before running. Commands use placeholders like &lt;samAccountName&gt; and admin subnets you must adjust for your environment.</div>';
+  var body=(d.sections||[]).map(function(s){
+    var items=s.items.map(function(it){
+      var cmd='';
+      if(it.cmd){var idx=advCmds.push(it.cmd)-1;cmd='<div class="cmdwrap"><button class="cmdcopy" onclick="copyCmd('+idx+',this)">copy</button><div class="cmd">'+highlightCmd(it.cmd)+'</div></div>';}
+      return '<div class="advitem"><div class="h"><span class="txt">'+esc(it.text)+'</span><span class="plat">'+esc(it.platformLabel)+'</span></div>'+(it.why?'<div class="why">'+esc(it.why)+'</div>':'')+cmd+'</div>';
+    }).join('');
+    return '<div class="advsec phase-'+s.key+'">'+esc(s.label)+'<span class="n">'+s.items.length+'</span></div>'+items;
+  }).join('');
+  document.getElementById('adviceModal').innerHTML='<div class="modal" onclick="if(event.target===this)closeAdvice()"><div class="modalbox wide">'+head+body+'</div></div>';
+}
 
 // ---- case controls (status / severity / lead / export) ----
 function renderCtl(s){

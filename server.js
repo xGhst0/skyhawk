@@ -12,6 +12,7 @@ const { makeStore } = require("./store.js");
 const { Finding, User, Role, TechnicalPolicy, FormalPolicy, Report, AuditLog, OfflineDraftAssist } = require("./domain/index.js");
 const pages = require("./pages.js");
 const attack = require("./attack.js");
+const remediation = require("./domain/remediation.js");
 
 const PORT = process.env.PORT || 8462;
 const useTLS = !!(process.env.TLS_CERT && process.env.TLS_KEY);
@@ -594,6 +595,7 @@ const handler = async (req, res) => {
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/formal$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => f.setIncludeInFormal(domainLead, !!b.include), "finding.formal"))); }
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/summary$/)) && req.method === "POST") { const b = await rb(); return send(res, 200, dehydrate(await curate(m[1], b, (f) => f.writeFormalSummary(domainLead, String(b.text || "")), "finding.summary"))); }
     if ((m = p.match(/^\/api\/findings\/([^/]+)\/draft$/)) && req.method === "POST") { const rec = await store.get("findings", m[1]); if (!rec) throw new Error("not found"); return send(res, 200, { text: assist.draftFormalSummary(hydrate(rec)) }); }
+    if ((m = p.match(/^\/api\/findings\/([^/]+)\/advice$/))) { const rec = await store.get("findings", m[1]); if (!rec) throw new Error("finding not found"); return send(res, 200, remediation.advise(rec, { iocs: await subDoc("iocs", rec.investigationId) })); }
     send(res, 404, { error: "not found" });
   } catch (e) { const code = e.code === 403 ? 403 : 400; log.warn("request.error", { p, err: String(e.message || e) }); send(res, code, { error: String(e.message || e) }); }
 };

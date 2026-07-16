@@ -126,6 +126,17 @@ New users can self-register and pick a title.
   can seed it ("Sync from findings"), but you own it. Saved per investigation.
 - **MITRE ATT&CK helper** - a searchable offline cheat sheet plus a keyword
   suggester ("Suggest from finding") so analysts don't need to know technique IDs.
+- **Response advisor** - every finding has a one-click **⚡ Advice** button that
+  builds a tailored, copy-pasteable response plan entirely offline. It reads the
+  finding's ATT&CK techniques, its affected systems and the case's IOCs, then
+  lays out concrete steps by phase - preserve evidence, contain, eradicate,
+  recover, block indicators, harden - with the actual commands the analyst runs.
+  It names the real hosts (e.g. *firewall-isolate WEB01 (10.0.1.20)*, *kill the
+  attacker's SSH session on DC01*), rolls the right credentials (AD resets,
+  krbtgt double-reset after DC compromise, LAPS), and generates per-IOC block
+  rules for Windows/Linux firewalls, DNS and EDR - each with a **copy** button
+  and a one-line "why". Deterministic knowledge base (`domain/remediation.js`),
+  no network, no LLM. Covers 20+ techniques with a sensible generic fallback.
 - **Technical report** - live, full, credited; printable to PDF. Now includes the
   incident timeline, IOC appendix and evidence hashes.
 - **Formal report workflow** - leads flag approved findings into the formal

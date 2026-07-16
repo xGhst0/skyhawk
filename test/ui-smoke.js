@@ -110,6 +110,20 @@ async function loadPage(path,cookie,seed){
   await sleep(400);
   ck('chat message rendered', d.getElementById('chMsgs').textContent.includes('harness hello'));
 
+  // response advisor: open ⚡ Advice on a finding, verify tailored plan + copyable commands
+  const advCard=[...d.querySelectorAll('#board .fnd')].find(c=>[...c.querySelectorAll('button')].some(b=>/Advice/.test(b.textContent)));
+  const advBtn=advCard&&[...advCard.querySelectorAll('button')].find(b=>/Advice/.test(b.textContent));
+  ck('Advice button present on findings', !!advBtn);
+  if(advBtn){ advBtn.click(); await sleep(400); }
+  const advBox=d.querySelector('#adviceModal .modalbox');
+  ck('advice modal opened', !!advBox);
+  ck('advice has phase sections', d.querySelectorAll('#adviceModal .advsec').length>0);
+  ck('advice has copy-pasteable commands', d.querySelectorAll('#adviceModal .cmd').length>0);
+  ck('advice command has a copy button', !!d.querySelector('#adviceModal .cmdcopy'));
+  ck('advice targets the finding host (WEB01/DC01)', /WEB01|DC01/.test((advBox&&advBox.textContent)||''));
+  win.closeAdvice();
+  ck('advice modal closed', !d.querySelector('#adviceModal .modalbox'));
+
   ck('no errors after interactions', errors.length===0, errors.join(' || '));
 
   // ---- ROLE ENFORCEMENT (Analyst) ----
