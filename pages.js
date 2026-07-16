@@ -406,6 +406,7 @@ function renderAdvice(d){
   var head='<div class="row" style="justify-content:space-between;margin-bottom:6px"><b>⚡ Response plan — '+esc(d.title)+'</b><a href="#" onclick="closeAdvice();return false" class="k">close</a></div>';
   head+='<div class="k" style="margin-bottom:4px">'+(hosts?'Targeting: '+hosts:'No systems attached to this finding.')+(d.attackerIp?' · attacker IP '+esc(d.attackerIp):'')+'</div>';
   head+=pills?'<div style="margin-bottom:6px">'+pills+'</div>':'';
+  head+=(d.tacticGuidance&&d.tacticGuidance.length)?'<div class="k" style="margin-bottom:4px">Includes tactic-level guidance for: '+d.tacticGuidance.map(esc).join(', ')+'.</div>':'';
   head+='<div class="k" style="margin-bottom:8px">Offline guidance — review before running. Commands use placeholders like &lt;samAccountName&gt; and admin subnets you must adjust for your environment.</div>';
   var body=(d.sections||[]).map(function(s){
     var items=s.items.map(function(it){

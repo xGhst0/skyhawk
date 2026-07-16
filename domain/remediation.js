@@ -10,7 +10,10 @@ exports.advise = advise;
 
 const attack = require("../attack.js");
 const TNAME = {};
-attack.techniques.forEach((t) => { TNAME[t.id] = t.name; });
+const TTACTIC = {};
+attack.techniques.forEach((t) => { TNAME[t.id] = t.name; TTACTIC[t.id] = t.tactic; });
+const TACTIC_NAME = {};
+attack.tactics.forEach((t) => { TACTIC_NAME[t.id] = t.name; });
 
 // platform → human label shown as a tag on each command
 const PLATFORMS = {
@@ -290,6 +293,126 @@ const TECH = {
     eradicate: [A("Hunt for and purge credentials sitting in files/config", "linux", `grep -RilnE "password|passwd|secret|api[_-]?key|BEGIN (RSA|OPENSSH) PRIVATE KEY" /home /etc /var/www 2>/dev/null | head -50`, "Find plaintext secrets the attacker likely already grabbed, then rotate every one you find.")],
     harden: [A("Move secrets into a vault and scan repos/configs in CI", "manual", "", "A secrets manager + pre-commit/CI scanning stops credentials living in files.")],
   },
+  T1558: {
+    contain: [A("Find kerberoastable / AS-REP-roastable accounts exposed here", "ad", `# Accounts with SPNs (kerberoastable) and no-preauth (AS-REP roastable)\nGet-ADUser -Filter { ServicePrincipalName -like '*' } -Properties ServicePrincipalName,PasswordLastSet | Format-Table Name,PasswordLastSet\nGet-ADUser -Filter { DoesNotRequirePreAuth -eq $true } -Properties DoesNotRequirePreAuth | Format-Table Name`, "Identify the service/user accounts whose tickets could be cracked offline, so you know what to rotate.")],
+    eradicate: [A("Reset the exposed service-account passwords (long/complex)", "ad", `Set-ADAccountPassword -Identity <svcAccount> -Reset -NewPassword (Read-Host -AsSecureString "New password (25+ chars)")`, "A cracked or forged service ticket is only killed by rotating that account's password.")],
+    recover: [A("Reset krbtgt TWICE to invalidate golden tickets", "ad", `# Prefer New-KrbtgtKeys.ps1. Manual (TWICE, one replication cycle apart):\nSet-ADAccountPassword -Identity krbtgt -Reset -NewPassword (ConvertTo-SecureString ([System.Web.Security.Membership]::GeneratePassword(64,10)) -AsPlainText -Force)`, "Golden tickets are forged from the krbtgt hash — only a double reset fully revokes them.")],
+    harden: [A("Force AES, use gMSA/25+ char service passwords, disable RC4", "ad", `# Group Managed Service Accounts remove the crackable password entirely\nNew-ADServiceAccount -Name <gMSA> -DNSHostName <host> -PrincipalsAllowedToRetrieveManagedPassword <group>`, "Long/managed passwords + AES-only make offline cracking infeasible.")],
+  },
+  T1550: {
+    contain: [A("Reset the abused account's password to invalidate the hash/ticket", "ad", `Set-ADAccountPassword -Identity <samAccountName> -Reset -NewPassword (Read-Host -AsSecureString "New password")\n# For pass-the-ticket, also reset krbtgt twice (see T1558).`, "Pass-the-hash/ticket reuses stolen material — rotating the credential is what actually revokes it.")],
+    harden: [A("Stop admin credential reuse: LAPS, tiered admin, deny NTLM where possible", "windows", `# Block members of a protected group from logging on to lower tiers, and use LAPS for local admin\nReset-LapsPassword -ComputerName <host>`, "Unique local-admin passwords and admin tiering stop one stolen hash unlocking the whole estate.")],
+  },
+  T1098: {
+    eradicate: [A("Review and revert recent account/group changes and added keys", "ad", `# Recently-changed privileged group membership\nGet-ADGroupMember "Domain Admins" | Get-ADUser -Properties whenChanged | Sort-Object whenChanged -Descending | Format-Table Name,whenChanged\n# Remove an attacker-added member\nRemove-ADGroupMember -Identity "Domain Admins" -Members <samAccountName> -Confirm:$false`, "Attackers grant themselves persistence by adding accounts to privileged groups, adding SSH keys, or registering MFA — audit and revert each.")],
+    harden: [A("Alert on group changes (4728/4732/4756) and new credential registration", "manual", "", "Privileged-group additions and new MFA/keys should page someone.")],
+  },
+  T1484: {
+    eradicate: [A("Audit recent GPO / policy changes and restore from backup", "ad", `Get-GPO -All | Where-Object { $_.ModificationTime -gt (Get-Date).AddDays(-7) } | Format-Table DisplayName,ModificationTime\n# Restore a tampered GPO\nRestore-GPO -Name "<GPO Name>" -Path <backup-path>`, "Domain/tenant policy edits push attacker config (scripts, scheduled tasks, rights) fleet-wide — find recent changes and roll them back.")],
+    harden: [A("Restrict who can edit GPOs and alert on 5136 directory changes", "manual", "", "Lock down GPO edit rights and monitor AD object modifications.")],
+  },
+  T1219: {
+    contain: [A("Kill and block the remote-access tool (AnyDesk/TeamViewer/RMM)", "windows", `Get-Process | Where-Object { $_.ProcessName -match 'anydesk|teamviewer|screenconnect|atera|splashtop|ngrok' } | Select-Object Id,ProcessName,Path\nStop-Process -Name <toolname> -Force\n# Then block its update/relay domains at the perimeter and uninstall it.`, "Attackers install legitimate RMM/remote tools for hands-on access — terminate, block its infrastructure, then uninstall.")],
+    harden: [A("Application-allowlist RMM tools; block unsanctioned ones", "manual", "", "Only your approved remote-support tool should run or reach the internet.")],
+  },
+  T1048: {
+    contain: [A("Block the exfil destination + protocol and quantify what left", "linux", `# Block the destination; inspect proxy/DNS/netflow for volume to it\nsudo iptables -A OUTPUT -d <dest-ip> -j DROP\n# DNS-exfil hint: unusually long/frequent TXT queries to one domain`, "Cut the channel (DNS/FTP/ICMP/HTTP to an odd host), then use proxy/netflow logs to size the loss.")],
+    harden: [A("Egress-filter outbound traffic and deploy DLP", "manual", "", "Default-deny egress + DLP catches and blocks alternative-protocol exfiltration.")],
+  },
+  T1485: {
+    contain: [A("Isolate destroying hosts immediately and protect backups", "manual", "", "Data destruction spreads like ransomware — segment first and get backups offline/read-only.")],
+    recover: [A("Restore from off-host, verified-clean backups", "manual", "", "On-host copies are usually targeted; rely on immutable/offline backups.")],
+    harden: [A("Keep offline immutable backups and restrict mass-delete rights", "manual", "", "Immutable backups + least-privilege on bulk delete blunt destruction.")],
+  },
+  T1561: {
+    contain: [A("Isolate wiped/wiping hosts and preserve one for analysis", "manual", "", "Disk wipers (often MBR/boot) render hosts unbootable — isolate to stop spread, image one victim for the wiper sample.")],
+    recover: [A("Rebuild from images and restore data from offline backups", "manual", "", "Wiped systems must be reimaged; recover data only from off-host backups.")],
+  },
+  T1531: {
+    contain: [A("Regain control via a break-glass admin and reset the locked accounts", "ad", `# Use an emergency/break-glass admin the attacker didn't touch\nSet-ADAccountPassword -Identity <lockedUser> -Reset -NewPassword (Read-Host -AsSecureString)\nEnable-ADAccount -Identity <lockedUser>`, "Attackers lock out defenders by changing passwords/deleting accounts — recover with a protected break-glass account.")],
+    harden: [A("Keep monitored break-glass accounts and alert on mass password/lockout events", "manual", "", "A protected emergency account plus alerting on bulk account changes keeps you in control.")],
+  },
+  T1114: {
+    contain: [A("Remove attacker inbox rules/forwards and revoke sessions", "m365", `# Connect-ExchangeOnline first. Hunt hidden forwarding + rules:\nGet-Mailbox <user> | Select-Object ForwardingSMTPAddress,DeliverToMailboxAndForward\nGet-InboxRule -Mailbox <user> | Format-Table Name,ForwardTo,RedirectTo,DeleteMessage\nRemove-InboxRule -Mailbox <user> -Identity "<rule>" -Confirm:$false\nRevoke-MgUserSignInSession -UserId <user@domain>`, "Email collection runs off auto-forwarding rules and delegate access — strip them and kill the sessions.")],
+    harden: [A("Alert on new forwarding rules and disable external auto-forward", "manual", "", "Block external auto-forward at the tenant and alert on rule creation.")],
+  },
+  T1036: {
+    eradicate: [A("Verify the suspect binary's real path, signature and hash", "windows", `Get-CimInstance Win32_Process -Filter "Name='svchost.exe'" | Select-Object ProcessId,ExecutablePath,CommandLine\nGet-AuthenticodeSignature <path-to-exe> | Select-Object Status,SignerCertificate\nGet-FileHash <path-to-exe> -Algorithm SHA256`, "Masquerading hides malware as a trusted name (e.g. svchost.exe in the wrong path) — confirm path, signature and hash, then kill/quarantine impostors.")],
+    harden: [A("Enable application control (WDAC/AppLocker) to block untrusted binaries", "manual", "", "Signed-and-allowed-only execution defeats renamed/relocated malware.")],
+  },
+  T1112: {
+    eradicate: [A("Compare the modified registry keys against a known-good baseline and revert", "windows", `reg query "<HKLM\\...\\suspect key>" /s\n# Export before changing, then delete the malicious value\nreg export "<key>" C:\\ir\\key-backup.reg\nreg delete "<key>" /v "<value>" /f`, "Registry edits underpin persistence, defense-evasion and config tampering — back up, then remove the attacker's values.")],
+    harden: [A("Audit changes to sensitive registry keys", "manual", "", "Enable auditing on Run keys, services and security-policy hives.")],
+  },
+};
+
+// ---- tactic-level fallbacks: every technique without a specific playbook
+// still gets solid, phase-appropriate guidance based on its ATT&CK tactic ----
+const TACTIC_FALLBACK = {
+  "reconnaissance": {
+    contain: [A("Confirm whether the recon led to access; scope what was exposed", "manual", "", "Reconnaissance itself isn't a breach — check perimeter/auth logs for follow-on activity from the same source and treat anything found as a real intrusion.")],
+    harden: [A("Reduce external attack surface and remove leaked information", "manual", "", "Take down exposed services/credentials, tighten what's public (job posts, metadata, subdomains), and rate-limit/alert on scanning.")],
+  },
+  "resource-development": {
+    contain: [A("Block the attacker infrastructure and pre-position detections", "manual", "", "If you've identified attacker domains/accounts/tooling being staged, block them (see the IOC-blocking section) and watch for their use.")],
+    harden: [A("Monitor for newly-registered look-alike domains and leaked credentials", "manual", "", "Typosquat/brand monitoring and credential-leak alerting catch staging before it's used against you.")],
+  },
+  "initial-access": {
+    contain: [A("Cut the entry vector and isolate the entry host", "manual", "", "Disable the exploited service, block the sender, or pull the exposed account — then isolate the first host (see the containment section above).")],
+    eradicate: [A("Remove the foothold the attacker established on entry", "manual", "", "Webshell, dropped tool, added account or mail rule — find and remove whatever gave them a way back in.")],
+    harden: [A("Patch the entry point and require MFA on all external access", "manual", "", "Close the specific vector (CVE, weak/exposed service, phishing path) and add MFA so a repeat attempt fails.")],
+  },
+  "execution": {
+    eradicate: [A("Identify and kill the malicious process, capturing its command line", "windows", `Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine | Sort-Object Name\nStop-Process -Id <pid> -Force`, "Grab the full command line (for IOCs) before terminating the payload/interpreter.")],
+    harden: [A("Enable command-line + script logging and application control", "windows", `reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f`, "Full command-line auditing plus WDAC/AppLocker makes execution both visible and harder.")],
+  },
+  "persistence": {
+    eradicate: [A("Sweep the host for persistence and remove the attacker's mechanism", "windows", `# Autoruns-style sweep: run keys, services, scheduled tasks, WMI subs, startup\nGet-CimInstance Win32_StartupCommand | Select-Object Name,Command,Location\nGet-ScheduledTask | Where-Object State -ne 'Disabled' | Select-Object TaskName,TaskPath\nGet-CimInstance -Namespace root\\subscription -Class __EventFilter | Select-Object Name,Query`, "Persistence hides in many places — enumerate autostarts, services, tasks and WMI subscriptions, then remove what's attacker-owned.")],
+    recover: [A("If persistence can't be fully proven clean, rebuild the host", "manual", "", "For anything critical, reimaging is safer than chasing every persistence artifact.")],
+    harden: [A("Baseline autoruns and alert on new persistence (4697/4698/7045)", "manual", "", "Alerting on service/task creation surfaces the next attempt fast.")],
+  },
+  "privilege-escalation": {
+    contain: [A("Identify what the attacker escalated to and constrain that access", "windows", `whoami /priv\nGet-LocalGroupMember -Group Administrators\nGet-ADGroupMember "Domain Admins" | Select-Object name`, "Confirm which privileges/groups were gained so you know the blast radius, then remove attacker-added rights.")],
+    eradicate: [A("Patch the escalation vector and remove attacker-added privileges", "manual", "", "Close the exploited weakness (kernel/app CVE, misconfig, token abuse) and revoke any rights they granted themselves.")],
+    harden: [A("Enforce least privilege and keep hosts patched", "manual", "", "Fewer local admins + timely patching removes most escalation paths.")],
+  },
+  "defense-evasion": {
+    contain: [A("Re-enable and verify security tooling; check for cleared logs", "windows", `Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,AMServiceEnabled\nSet-MpPreference -DisableRealtimeMonitoring $false; Start-Service WinDefend\nGet-WinEvent -FilterHashtable @{LogName='Security';Id=1102} -MaxEvents 5`, "Evasion works by blinding you — restore AV/EDR and confirm logs weren't wiped (Event 1102).")],
+    eradicate: [A("Remove the evasion artifacts (masqueraded files, hidden persistence)", "manual", "", "Hunt renamed/hidden binaries, tampered config and disabled controls, then restore them.")],
+    harden: [A("Enable Tamper Protection and ship logs off-host in real time", "manual", "", "Tamper Protection blocks defense-disabling; central logging defeats local log deletion.")],
+  },
+  "credential-access": {
+    contain: [A("Assume the targeted credentials are stolen and plan rotation", "manual", "", "Scope which accounts/secrets were reachable from the affected host, prioritising admins and service accounts.")],
+    eradicate: [A("Force-reset the exposed credentials", "ad", `Set-ADAccountPassword -Identity <samAccountName> -Reset -NewPassword (Read-Host -AsSecureString "New password")\nSet-ADUser -Identity <samAccountName> -ChangePasswordAtLogon $true`, "Rotate every credential the attacker could have captured.")],
+    harden: [A("Enforce MFA, LSA Protection and phishing-resistant auth", "windows", `reg add HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa /v RunAsPPL /t REG_DWORD /d 1 /f`, "MFA + protected LSASS + FIDO2 blunt most credential theft.")],
+  },
+  "discovery": {
+    contain: [A("Treat discovery as a live intruder mapping your environment", "manual", "", "Enumeration (accounts, shares, trusts, services) precedes lateral movement — hunt the same host/account for the next stage now, don't wait.")],
+    harden: [A("Limit what low-privileged accounts can enumerate; alert on recon bursts", "manual", "", "Restrict anonymous/LDAP enumeration and alert on rapid net/AD discovery from one host.")],
+  },
+  "lateral-movement": {
+    contain: [A("Cut the lateral protocols from the source and reset the pivot account", "windows", `New-NetFirewallRule -DisplayName "IR-Block-Lateral" -Direction Inbound -Protocol TCP -LocalPort 445,3389,5985 -RemoteAddress <attacker-ip> -Action Block`, "Block SMB/RDP/WinRM from the compromised host and rotate the account being used to move.")],
+    eradicate: [A("Remove tooling the attacker transferred to reached hosts", "windows", `Get-ChildItem C:\\Windows\\Temp,C:\\ProgramData -Include *.exe,*.dll,*.ps1 -Recurse -ErrorAction SilentlyContinue | Where-Object LastWriteTime -gt (Get-Date).AddDays(-2)`, "Sweep each reached host for staged binaries and hash them for fleet-wide IOCs.")],
+    harden: [A("Segment the network and require MFA on admin protocols", "manual", "", "Host-firewall/VLAN segmentation + MFA on RDP/WinRM stop the pivot repeating.")],
+  },
+  "collection": {
+    contain: [A("Identify what data was staged and cut the collection", "windows", `# Recent large archives are classic staging\nGet-ChildItem C:\\,D:\\ -Include *.zip,*.rar,*.7z,*.tar,*.gz -Recurse -ErrorAction SilentlyContinue | Where-Object Length -gt 10MB | Sort-Object LastWriteTime -Descending | Select-Object FullName,Length,LastWriteTime`, "Find staged/archived data so you know what's at risk of exfiltration, then remove it and cut access.")],
+    harden: [A("Apply least-privilege on sensitive repositories and deploy DLP", "manual", "", "Restrict who can bulk-read sensitive stores and watch for mass collection.")],
+  },
+  "command-and-control": {
+    contain: [A("Block the C2 at the edge, DNS and proxy, then remove the implant", "manual", "", "Deny the beacon's destinations everywhere (see the IOC-blocking section) and kill/remove the implant process so it can't fail over to a backup channel.")],
+    harden: [A("Force outbound through an inspecting proxy and alert on beaconing", "manual", "", "Default-deny egress with proxy inspection makes periodic/jittered callbacks stand out and fail.")],
+  },
+  "exfiltration": {
+    contain: [A("Block the exfil destination, throttle egress, and size the loss", "manual", "", "Cut the channel to the destination, then use proxy/DLP/netflow logs to determine what and how much data left.")],
+    harden: [A("Egress-filter outbound traffic and deploy DLP", "manual", "", "Default-deny egress + DLP detects and blocks bulk data leaving.")],
+  },
+  "impact": {
+    contain: [A("Isolate affected hosts to stop the spread and protect backups", "manual", "", "Destructive/impact actions spread fast — segment immediately and get backups offline/read-only before they're reached.")],
+    eradicate: [A("Remove the tool causing impact and the intrusion behind it", "manual", "", "Don't just undo the damage — the access that delivered it is still present; remove it too.")],
+    recover: [A("Restore from verified clean backups, rebuilding identity/tier-0 first", "manual", "", "Validate backup integrity, bring DCs/identity back first, and rotate all credentials.")],
+    harden: [A("Keep offline immutable backups and segment the network", "manual", "", "Immutable backups + segmentation turn a fleet-wide event into a contained one.")],
+  },
 };
 
 // ---- IOC blocking (dynamic from the case's indicators) ----
@@ -369,7 +492,7 @@ function advise(finding, ctx) {
     buckets.contain.push(A("Isolate the affected host(s)", "edr", "", "No systems are attached to this finding yet — add them under 'Affected systems' and re-open this advisor for host-specific commands."));
   }
 
-  // 2) technique-specific advice (dedupe against exact + parent)
+  // 2) technique-specific advice (exact id + parent, deduped)
   const applied = new Set();
   [...ids].forEach((id) => {
     const kb = TECH[id];
@@ -378,12 +501,25 @@ function advise(finding, ctx) {
     ["contain", "eradicate", "recover", "harden"].forEach((ph) => (kb[ph] || []).forEach((it) => buckets[ph].push(it)));
   });
 
+  // 2b) tactic-level fallback: any matched technique WITHOUT a specific
+  // playbook still gets phase-appropriate guidance from its ATT&CK tactic
+  const tacticsUsed = [];
+  raw.forEach((id) => {
+    if (TECH[id] || TECH[id.split(".")[0]]) return; // has a specific playbook already
+    const tac = TTACTIC[id] || TTACTIC[id.split(".")[0]];
+    if (tac && TACTIC_FALLBACK[tac] && tacticsUsed.indexOf(tac) < 0) tacticsUsed.push(tac);
+  });
+  tacticsUsed.forEach((tac) => {
+    const kb = TACTIC_FALLBACK[tac];
+    ["contain", "eradicate", "recover", "harden"].forEach((ph) => (kb[ph] || []).forEach((it) => buckets[ph].push(it)));
+  });
+
   // 3) IOC blocking from the case indicators
   blockIocs(iocs).forEach((it) => buckets.block.push(it));
 
-  // 4) baseline hardening + evidence reminder if nothing matched
-  if (!withPlaybook.length) {
-    buckets.harden.push(A("Map this finding to an ATT&CK technique for targeted advice", "manual", "", "Add the technique ID(s) on the finding (use the ATT&CK helper) and re-open this advisor to get technique-specific containment and eradication steps."));
+  // 4) if the finding has no ATT&CK technique at all, nudge to add one
+  if (!raw.length) {
+    buckets.harden.push(A("Map this finding to an ATT&CK technique for targeted advice", "manual", "", "Add the technique ID(s) on the finding (use the ATT&CK helper) and re-open this advisor for technique-specific containment and eradication steps."));
   }
 
   // substitute the few global placeholders in technique items
@@ -392,10 +528,13 @@ function advise(finding, ctx) {
     .replace(/\{HOST\}/g, hosts[0] ? hosts[0].host : "the host")
     .replace(/\{IP\}/g, (hosts[0] && hosts[0].ip) || attackerIp || "<host-ip>");
 
-  const sections = PHASES.map(([key, label]) => ({
-    key, label,
-    items: buckets[key].map((it) => ({ ...it, text: subs(it.text), cmd: subs(it.cmd), platformLabel: PLATFORMS[it.platform] || "Step" })),
-  })).filter((s) => s.items.length);
+  // build sections, deduping repeated advice by text within each phase
+  const sections = PHASES.map(([key, label]) => {
+    const seen = new Set();
+    const items = buckets[key].filter((it) => { if (seen.has(it.text)) return false; seen.add(it.text); return true; })
+      .map((it) => ({ ...it, text: subs(it.text), cmd: subs(it.cmd), platformLabel: PLATFORMS[it.platform] || "Step" }));
+    return { key, label, items };
+  }).filter((s) => s.items.length);
 
   return {
     findingId: finding.id,
@@ -404,7 +543,9 @@ function advise(finding, ctx) {
     hosts: hosts.map((h) => ({ host: h.host, ip: h.ip, type: h.type })),
     attackerIp,
     matched,
-    hasPlaybook: withPlaybook.length > 0,
+    hasPlaybook: withPlaybook.length > 0 || tacticsUsed.length > 0,
+    specificCount: withPlaybook.length,
+    tacticGuidance: tacticsUsed.map((t) => TACTIC_NAME[t] || t),
     sections,
   };
 }

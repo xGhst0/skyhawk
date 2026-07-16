@@ -124,8 +124,10 @@ New users can self-register and pick a title.
 - **Editable network map** - a full drag-and-drop builder for the whole
   environment: add/link/position devices, set compromise state, edit IPs. Findings
   can seed it ("Sync from findings"), but you own it. Saved per investigation.
-- **MITRE ATT&CK helper** - a searchable offline cheat sheet plus a keyword
-  suggester ("Suggest from finding") so analysts don't need to know technique IDs.
+- **MITRE ATT&CK helper** - a searchable offline cheat sheet covering the **full
+  ATT&CK Enterprise matrix (all ~200 techniques across 14 tactics)** plus a
+  keyword suggester ("Suggest from finding") so analysts don't need to know
+  technique IDs.
 - **Response advisor** - every finding has a one-click **⚡ Advice** button that
   builds a tailored, copy-pasteable response plan entirely offline. It reads the
   finding's ATT&CK techniques, its affected systems and the case's IOCs, then
@@ -136,7 +138,10 @@ New users can self-register and pick a title.
   krbtgt double-reset after DC compromise, LAPS), and generates per-IOC block
   rules for Windows/Linux firewalls, DNS and EDR - each with a **copy** button
   and a one-line "why". Deterministic knowledge base (`domain/remediation.js`),
-  no network, no LLM. Covers 20+ techniques with a sensible generic fallback.
+  no network, no LLM. **Every ATT&CK technique is covered**: ~40 have detailed
+  technique-specific playbooks, and every other technique falls back to solid,
+  phase-appropriate guidance for its tactic (sub-techniques inherit their
+  parent's playbook).
 - **Technical report** - live, full, credited; printable to PDF. Now includes the
   incident timeline, IOC appendix and evidence hashes.
 - **Formal report workflow** - leads flag approved findings into the formal
