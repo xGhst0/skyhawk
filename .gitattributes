@@ -1,0 +1,4 @@
+# Shell scripts must stay LF so they run on Linux/macOS even when edited on Windows.
+*.sh text eol=lf
+# PowerShell is fine either way; keep it consistent.
+*.ps1 text
