@@ -52,6 +52,7 @@ Description=SKYHAWK
 After=network.target
 [Service]
 Environment=PORT=$PORT
+${SKYHAWK_ENROLL_TOKEN:+Environment=SKYHAWK_ENROLL_TOKEN=$SKYHAWK_ENROLL_TOKEN}
 WorkingDirectory=$DIR
 ExecStart=$NODE_BIN $DIR/server.js
 Restart=always
@@ -60,7 +61,9 @@ RestartSec=2
 WantedBy=default.target
 UNIT
   systemctl --user daemon-reload
-  systemctl --user enable --now skyhawk.service
+  systemctl --user enable skyhawk.service >/dev/null 2>&1 || true
+  # restart (not just start) so re-running the installer picks up pulled updates
+  systemctl --user restart skyhawk.service
   loginctl enable-linger "$(whoami)" >/dev/null 2>&1 || true
   echo "→ Installed as a systemd user service (auto-restart, starts on boot)."
 }

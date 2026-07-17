@@ -605,11 +605,16 @@ function ago(ts){if(!ts)return'never';const s=Math.floor((Date.now()-ts)/1000);i
 async function loadAgents(){
   const box=document.getElementById('agentList');if(!box)return;
   // Manager-only enrollment helper
-  if(!agentEnrollShown&&hasCap('user.manage')){agentEnrollShown=true;try{const c=await (await fetch('/api/agents/config')).json();if(!c.error){const base=(c.tls?'https':'http')+'://'+location.hostname+':'+c.port;const tok=esc(c.enrollToken);
-    document.getElementById('agentEnroll').innerHTML='<div class="card"><div class="k" style="margin-bottom:6px">Deploy the agent to a host, then enrol it:</div>'
-      +'<div class="k" style="margin:8px 0 3px">Windows · PowerShell</div><div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+'enrollWin'+Q+')">copy</button><div class="cmd" id="enrollWin">powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 -Server '+base+' -EnrollToken '+tok+'</div></div>'
-      +'<div class="k" style="margin:10px 0 3px">Linux · bash</div><div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+'enrollLin'+Q+')">copy</button><div class="cmd" id="enrollLin">./skyhawk-agent.sh --server '+base+' --enroll-token '+tok+'</div></div>'
-      +'</div>';}}catch(e){}}
+  if(!agentEnrollShown&&hasCap('user.manage')){agentEnrollShown=true;try{const c=await (await fetch('/api/agents/config')).json();if(!c.error){
+    const skyhost=(c.serverHosts&&c.serverHosts.length)?c.serverHosts[0]:location.hostname;
+    const base=(c.tls?'https':'http')+'://'+skyhost+':'+c.port;const tok=esc(c.enrollToken);const ck=c.tls?'k':'';
+    const blk=function(id,cmd){return '<div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+id+Q+')">copy</button><div class="cmd" id="'+id+'">'+cmd+'</div></div>';};
+    let h='<div class="card"><div class="k" style="margin-bottom:6px">Deploy the agent to the target host. Each one-liner pulls the agent straight from SKYHAWK ('+esc(base)+') and enrols it. Manager view.</div>';
+    h+='<div class="k" style="margin:8px 0 3px">Linux &mdash; download &amp; run on the target</div>'+blk('dlLin','curl -fsSL'+ck+' '+base+'/agent/skyhawk-agent.sh | bash -s -- --server '+base+' --enroll-token '+tok);
+    h+='<div class="k" style="margin:10px 0 3px">Windows &mdash; download &amp; run on the target</div>'+blk('dlWin','iwr '+base+'/agent/skyhawk-agent.ps1 -OutFile skyhawk-agent.ps1; powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 -Server '+base+' -EnrollToken '+tok);
+    h+='<div class="k" style="margin:10px 0 3px">Push over SSH &mdash; from your box, set USER@TARGET</div>'+blk('sshCmd','curl -fsSL'+ck+' '+base+'/agent/skyhawk-agent.sh -o sky.sh &amp;&amp; scp sky.sh USER@TARGET:/tmp/ &amp;&amp; ssh USER@TARGET '+Q+'bash /tmp/sky.sh --server '+base+' --enroll-token '+tok+Q);
+    h+='</div>';document.getElementById('agentEnroll').innerHTML=h;
+  }}catch(e){}}
   let rows;try{rows=await (await fetch('/api/agents')).json();}catch(e){box.innerHTML='<div class="empty">Could not load agents.</div>';return;}
   if(!rows.length){box.innerHTML='<div class="empty">No agents enrolled yet.'+(hasCap('user.manage')?' Use the command above to enrol one.':'')+'</div>';return;}
   const canCollect=hasCap('tech.control');

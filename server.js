@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const https = require("https");
+const os = require("os");
 const log = require("./logger.js");
 const { makeStore } = require("./store.js");
 const { Finding, User, Role, TechnicalPolicy, FormalPolicy, Report, AuditLog, OfflineDraftAssist } = require("./domain/index.js");
@@ -21,6 +22,14 @@ const useTLS = !!(process.env.TLS_CERT && process.env.TLS_KEY);
 // otherwise a random one is generated per boot and printed to the log.
 const AGENT_ENROLL = process.env.SKYHAWK_ENROLL_TOKEN || crypto.randomBytes(12).toString("hex");
 const COLLECTORS = ["triage", "chainsaw"];
+// Reachable (non-loopback) IPv4 addresses, so the Agents tab can hand out a
+// deploy one-liner that a *remote* target host can actually curl back to.
+function lanHosts() {
+  const out = [], ifs = os.networkInterfaces();
+  for (const name in ifs) for (const a of ifs[name] || []) if (a.family === "IPv4" && !a.internal) out.push(a.address);
+  return out;
+}
+const AGENT_FILES = { "/agent/skyhawk-agent.ps1": "skyhawk-agent.ps1", "/agent/skyhawk-agent.sh": "skyhawk-agent.sh" };
 const store = makeStore(log);
 const assist = new OfflineDraftAssist();
 const EVID = path.join(__dirname, "evidence");
@@ -677,6 +686,14 @@ const handler = async (req, res) => {
     if ((rm = p.match(/^\/investigations\/([^/]+)\/report\/technical$/))) { const d = await reportData(rm[1]); return send(res, 200, pages.report("technical", d), "text/html"); }
     if ((rm = p.match(/^\/investigations\/([^/]+)\/report\/formal$/))) { const d = await reportData(rm[1]); return send(res, 200, pages.report("formal", d), "text/html"); }
     if (p === "/favicon.svg" || p === "/favicon.ico") return send(res, 200, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="26" fill="#0B0D10"/><g fill="#5EEAD4"><path d=\"M58 32 C58 27 70 27 70 32 C70 39 66 43 64 48 C62 43 58 39 58 32 Z\"/><path d=\"M64 44 L60 54 L64 50 L68 54 Z\"/><path d=\"M60 48 L59 70 L69 70 L68 48 Z\"/><path d=\"M60 50 L16 28 L30 47 L47 51 L58 62 Z\"/><path d=\"M68 50 L112 28 L98 47 L81 51 L70 62 Z\"/><path d=\"M64 68 L60 90 L64 84 L68 90 Z\"/><path d=\"M60 68 L50 84 L42 88 L49 88 L44 94 L52 90 L50 97 L56 89 L63 70 Z\"/><path d=\"M68 68 L78 84 L86 88 L79 88 L84 94 L76 90 L78 97 L72 89 L65 70 Z\"/></g></svg>', "image/svg+xml");
+    // serve the collection-agent scripts so a target host can pull them over HTTP
+    // (no auth: the scripts carry no secrets; running one still needs the enrol token)
+    if (AGENT_FILES[p]) {
+      const fp = path.join(__dirname, "agent", AGENT_FILES[p]);
+      if (!fs.existsSync(fp)) return send(res, 404, { error: "agent script not found" });
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Content-Disposition": "attachment; filename=" + AGENT_FILES[p] });
+      return res.end(fs.readFileSync(fp));
+    }
     if (p === "/api/devices") return send(res, 200, DEVICE_TYPES);
     if (p === "/api/users" && req.method === "GET") return send(res, 200, [...USERS.values()].map(pub));
     if (p === "/api/users" && req.method === "POST") { requireCap(actor.id, "user.manage"); return send(res, 201, pub(await createUser(await rb()))); }
@@ -714,7 +731,7 @@ const handler = async (req, res) => {
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/tasks\/([^/]+)\/remove$/)) && req.method === "POST") return send(res, 200, await taskRemove(m[1], m[2], await rb()));
     if (p === "/api/ingest/profiles") return send(res, 200, ingest.profiles());
     if (p === "/api/agents" && req.method === "GET") return send(res, 200, await agentList());
-    if (p === "/api/agents/config") { requireCap(actor.id, "user.manage"); return send(res, 200, { enrollToken: AGENT_ENROLL, collectors: COLLECTORS, tls: useTLS, port: PORT }); }
+    if (p === "/api/agents/config") { requireCap(actor.id, "user.manage"); return send(res, 200, { enrollToken: AGENT_ENROLL, collectors: COLLECTORS, tls: useTLS, port: PORT, serverHosts: lanHosts() }); }
     if ((m = p.match(/^\/api\/agents\/([^/]+)\/collect$/)) && req.method === "POST") return send(res, 201, await agentCollect(m[1], await rb()));
     if ((m = p.match(/^\/api\/agents\/([^/]+)\/remove$/)) && req.method === "POST") return send(res, 200, await agentRemove(m[1], await rb()));
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/ingest\/preview$/)) && req.method === "POST") {

@@ -164,29 +164,51 @@ channel. You deploy it to machines you administer with your own tooling.
   <img src="assets/agents.png" alt="Collection agents tab with enrolled hosts" width="820">
 </p>
 
-1. Set an enrolment secret on the server (otherwise one is generated per boot and
-   printed to the log):
+1. Set an enrolment secret so agents enrol against a known token (otherwise a
+   random one is generated per boot and written to the log). If SKYHAWK is
+   installed as a service, bake the token in by passing it to the installer,
+   which also pulls the latest code and restarts the service:
 
    ```bash
-   SKYHAWK_ENROLL_TOKEN=your-shared-secret node server.js
+   curl -fsSL https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.sh \
+     | SKYHAWK_ENROLL_TOKEN=your-shared-secret bash
    ```
 
-2. Deploy the agent to a host and start it. The **Agents** tab shows the exact
-   command with your token filled in.
+   Running it by hand instead? Start it from the repo directory:
+   `cd skyhawk && SKYHAWK_ENROLL_TOKEN=your-shared-secret node server.js` — and
+   don't run a second copy while the service is up, or the port is already taken.
 
-   **Windows** (`agent/skyhawk-agent.ps1`, via GPO / scheduled task / admin shell):
+   SKYHAWK usually runs on its own host, so it serves the agent scripts over HTTP.
+   The target pulls and runs one in a single command. The **Agents** tab (Manager
+   view) shows these with your server address and token already filled in.
+
+2. Deploy the agent to the host under investigation.
+
+   **Linux** (needs only bash + curl):
+
+   ```bash
+   curl -fsSL http://skyhawk.lan:8462/agent/skyhawk-agent.sh | bash -s -- \
+     --server http://skyhawk.lan:8462 --enroll-token your-shared-secret
+   ```
+
+   **Windows** (PowerShell):
 
    ```powershell
+   iwr http://skyhawk.lan:8462/agent/skyhawk-agent.ps1 -OutFile skyhawk-agent.ps1
    powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
-     -Server https://skyhawk.lan:8462 -EnrollToken your-shared-secret
+     -Server http://skyhawk.lan:8462 -EnrollToken your-shared-secret
    ```
 
-   **Linux** (`agent/skyhawk-agent.sh`, via systemd / cron / admin shell; needs
-   only bash + curl):
+   **Push over SSH** when the target can't reach SKYHAWK directly (run from your box):
 
    ```bash
-   ./skyhawk-agent.sh --server https://skyhawk.lan:8462 --enroll-token your-shared-secret
+   curl -fsSL http://skyhawk.lan:8462/agent/skyhawk-agent.sh -o sky.sh
+   scp sky.sh USER@TARGET:/tmp/ && ssh USER@TARGET \
+     'bash /tmp/sky.sh --server http://skyhawk.lan:8462 --enroll-token your-shared-secret'
    ```
+
+   For a persistent agent, run it under systemd / cron (Linux) or a scheduled task
+   (Windows) rather than a one-off shell. GPO, SCCM, and Ansible work too.
 
 3. In a case, open **Agents**, pick a host and a collector, and hit **Collect**.
    The results ingest straight into that case and the whole thing is recorded in
