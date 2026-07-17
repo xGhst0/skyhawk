@@ -605,7 +605,11 @@ function ago(ts){if(!ts)return'never';const s=Math.floor((Date.now()-ts)/1000);i
 async function loadAgents(){
   const box=document.getElementById('agentList');if(!box)return;
   // Manager-only enrollment helper
-  if(!agentEnrollShown&&hasCap('user.manage')){agentEnrollShown=true;try{const c=await (await fetch('/api/agents/config')).json();if(!c.error){const proto=c.tls?'https':'http';document.getElementById('agentEnroll').innerHTML='<div class="card"><div class="k" style="margin-bottom:6px">Deploy the agent to a host (GPO / scheduled task), then enrol it:</div><div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+'enroll'+Q+')">copy</button><div class="cmd" id="enrollCmd">powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 -Server '+proto+'://'+location.hostname+':'+c.port+' -EnrollToken '+esc(c.enrollToken)+'</div></div></div>';}}catch(e){}}
+  if(!agentEnrollShown&&hasCap('user.manage')){agentEnrollShown=true;try{const c=await (await fetch('/api/agents/config')).json();if(!c.error){const base=(c.tls?'https':'http')+'://'+location.hostname+':'+c.port;const tok=esc(c.enrollToken);
+    document.getElementById('agentEnroll').innerHTML='<div class="card"><div class="k" style="margin-bottom:6px">Deploy the agent to a host, then enrol it:</div>'
+      +'<div class="k" style="margin:8px 0 3px">Windows · PowerShell</div><div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+'enrollWin'+Q+')">copy</button><div class="cmd" id="enrollWin">powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 -Server '+base+' -EnrollToken '+tok+'</div></div>'
+      +'<div class="k" style="margin:10px 0 3px">Linux · bash</div><div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+'enrollLin'+Q+')">copy</button><div class="cmd" id="enrollLin">./skyhawk-agent.sh --server '+base+' --enroll-token '+tok+'</div></div>'
+      +'</div>';}}catch(e){}}
   let rows;try{rows=await (await fetch('/api/agents')).json();}catch(e){box.innerHTML='<div class="empty">Could not load agents.</div>';return;}
   if(!rows.length){box.innerHTML='<div class="empty">No agents enrolled yet.'+(hasCap('user.manage')?' Use the command above to enrol one.':'')+'</div>';return;}
   const canCollect=hasCap('tech.control');
@@ -620,7 +624,7 @@ async function doCollect(id){
   try{await post('/api/agents/'+id+'/collect',{invId:INV,collector});loadAgents();}catch(e){}
 }
 async function dropAgent(id){if(!confirm('Remove this agent? It can re-enrol with the token.'))return;await post('/api/agents/'+id+'/remove');loadAgents();}
-function copyText(btn,which){var t=which==='enroll'?document.getElementById('enrollCmd').textContent:'';function ok(){var o=btn.textContent;btn.textContent='copied ✓';setTimeout(function(){btn.textContent=o;},1000);}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok).catch(function(){});}else ok();}
+function copyText(btn,elId){var el=document.getElementById(elId);var t=el?el.textContent:'';function ok(){var o=btn.textContent;btn.textContent='copied ✓';setTimeout(function(){btn.textContent=o;},1000);}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok).catch(function(){});}else ok();}
 
 function initSelects(s){
   document.getElementById('tlsrc').innerHTML=s.tlSources.map(function(x){return '<option>'+esc(x)+'</option>';}).join('');

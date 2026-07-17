@@ -171,13 +171,21 @@ channel. You deploy it to machines you administer with your own tooling.
    SKYHAWK_ENROLL_TOKEN=your-shared-secret node server.js
    ```
 
-2. Drop `agent/skyhawk-agent.ps1` onto a Windows host via GPO, a scheduled task,
-   or an admin session, and start it. The **Agents** tab shows the exact command
-   with your token filled in.
+2. Deploy the agent to a host and start it. The **Agents** tab shows the exact
+   command with your token filled in.
+
+   **Windows** (`agent/skyhawk-agent.ps1`, via GPO / scheduled task / admin shell):
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
      -Server https://skyhawk.lan:8462 -EnrollToken your-shared-secret
+   ```
+
+   **Linux** (`agent/skyhawk-agent.sh`, via systemd / cron / admin shell; needs
+   only bash + curl):
+
+   ```bash
+   ./skyhawk-agent.sh --server https://skyhawk.lan:8462 --enroll-token your-shared-secret
    ```
 
 3. In a case, open **Agents**, pick a host and a collector, and hit **Collect**.
@@ -187,16 +195,23 @@ channel. You deploy it to machines you administer with your own tooling.
 <details>
 <summary>Collectors and guardrails</summary>
 
-| Collector | Gathers (read-only) |
-|-----------|---------------------|
-| `triage` | processes and command lines, established network connections, recent logon events (4624/4625), Run-key autoruns, non-system services |
-| `chainsaw` | runs a bundled `chainsaw.exe` over the local event logs and uploads the detections (falls back to `triage` if Chainsaw is not present) |
+Both agents produce the same result shape. What each `triage` gathers, read-only:
 
-The server can only ask an agent to run one of the collectors above. It cannot
+| Platform | Gathers |
+|----------|---------|
+| Windows | processes and command lines, established network connections, logon events (4624/4625), Run-key autoruns, non-system services |
+| Linux | processes and command lines (`ps`), established connections (`ss`/`netstat`), recent logins with source IPs (`last`) |
+
+The Windows `chainsaw` collector runs a bundled `chainsaw.exe` over the local
+event logs and uploads the detections (it falls back to `triage` if Chainsaw is
+not present). On Linux every collector maps to `triage`, since there are no
+Windows event logs to hunt.
+
+The server can only ask an agent to run one of these fixed collectors. It cannot
 send arbitrary commands. The agent is read-only, authenticates with a per-host
-token, does nothing to hide itself, and is one readable PowerShell script.
-Queuing a collection needs the Tech Lead role. There is also a `-Once` mode for a
-scheduled sweep — see the top of the script.
+token, does nothing to hide itself, and is a single readable script. Queuing a
+collection needs the Tech Lead role. Both scripts have a one-shot mode for a
+scheduled sweep (`-Once` / `--once`) — see the top of each script.
 
 </details>
 
