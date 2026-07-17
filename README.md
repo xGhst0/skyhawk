@@ -2,240 +2,228 @@
 
 # 🦅 SKYHAWK
 
-**Air-gapped investigation-to-report platform for blue-team analyst teams.**
+**The air-gapped case file for blue teams.**
 
-Analysts capture findings with full evidence, leads curate, managers sign - and
-every case produces a live technical report and a frozen, signed formal report.
-Runs entirely on `localhost` / your LAN. No internet. No database required.
+Work an incident end to end without ever leaving `localhost`: capture findings
+with evidence, pull triage off your endpoints, map the intrusion to ATT&CK, get
+the exact commands to contain it, and hand over a signed report. No cloud, no
+database, no npm install.
 
-`self-hosted` · `runs offline` · `zero runtime dependencies` · `role-based access`
+[![offline](https://img.shields.io/badge/runs-offline-0e8c7a)](#security)
+[![zero dependencies](https://img.shields.io/badge/runtime%20deps-0-0e8c7a)](#why-skyhawk)
+[![node](https://img.shields.io/badge/node-18%2B-5eead4)](#quick-start)
+[![license](https://img.shields.io/badge/license-MIT-555)](LICENSE)
+
+[Quick start](#quick-start) · [Features](#what-you-get) · [Air-gapped install](#air-gapped-install) · [Collection agents](#collection-agents) · [Security](#security)
 
 </div>
 
+<p align="center">
+  <img src="assets/workspace.png" alt="SKYHAWK investigation workspace" width="860">
+</p>
+
 ---
 
-## Install & run (one command)
+## Why SKYHAWK
 
-**Linux / macOS**
+Most incident-response tooling assumes an internet connection, a database
+cluster, and a pile of dependencies to keep patched. That is a bad fit for a
+classified enclave, a field kit, or anywhere the network is the thing you do not
+trust.
+
+SKYHAWK is the opposite. It is a single Node.js process with **zero runtime
+dependencies** that runs on a laptop or a LAN and never phones home. It still
+does the whole job: a real case lifecycle, evidence handling with integrity
+hashes, a hash-chained audit trail, and a frozen, signed report at the end. If
+you have used IRIS, TheHive, or Velociraptor and wished one of them ran
+completely offline with nothing to install, that is the gap this fills.
+
+Built for analysts, leads, and managers who have to be able to say *exactly*
+what happened and prove they did not touch the evidence.
+
+## What you get
+
+**Investigate.** Log findings with typed affected systems, screenshots that are
+SHA-256 hashed on upload, verbatim queries and tooling. Build the environment on
+a drag-and-drop network map. Reconstruct the attack on an incident timeline.
+Track indicators that get auto-classified (IP, domain, URL, hash, CVE, and more)
+and pulled straight out of your finding text.
+
+**Ingest and collect.** Drop a **Chainsaw** Sigma-hunt export into the Ingest tab
+and it becomes findings, timeline events and IOCs, deduped against the case.
+Deploy the read-only **collection agent** to hosts on your network and pull live
+triage back into a case with one click — no third-party EDR required.
+
+**Understand and respond.** Every technique in the **full MITRE ATT&CK Enterprise
+matrix** is searchable, with a keyword suggester so you do not need to memorise
+IDs. Then the **response advisor** turns any finding into a concrete, phased plan
+with commands you can copy and paste: isolate `WEB01`, kill the attacker's SSH
+session, roll the exposed credentials, reset krbtgt, block the C2 at the
+perimeter. It covers all 200 techniques, offline, with no model behind it.
+
+**Report.** The technical report is live and credited to the analyst. The formal
+report is the deliverable: a lead flags findings and writes plain-language
+summaries, a manager freezes and signs it, and you get an immutable, versioned
+snapshot with analyst names and raw detail stripped by policy. Both print
+straight to PDF.
+
+**Prove it.** Every action on a case lands in a tamper-evident, hash-chained
+audit log that is re-verified on every load and after a restart. Export a whole
+case (evidence, timeline, IOCs, audit chain and all) as one file to move between
+enclaves; the chain is re-checked on import.
+
+**Run it your way.** Role-based access (Analyst / Tech Lead / Manager) with real
+scrypt-hashed auth and server-side sessions. File store by default, Postgres with
+one env flip. Optional HTTPS. Per-account themes. A local team chat with DMs.
+
+## Quick start
+
+You need Node.js 18 or newer. There is nothing to build and nothing to
+`npm install` — the app uses only built-in modules.
 
 ```bash
+git clone https://github.com/xGhst0/skyhawk && cd skyhawk
+node server.js
+```
+
+Open **http://localhost:8462** and sign in as `Morgan` / `skyhawk`.
+
+Prefer a one-liner that also installs Node if it is missing and registers a
+service that survives reboots?
+
+```bash
+# Linux / macOS
 curl -fsSL https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.sh | bash
 ```
 
-**Windows (PowerShell)**
-
 ```powershell
+# Windows (PowerShell)
 irm https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 | iex
 ```
 
-<sub>Windows with curl instead: `curl.exe -L https://raw.githubusercontent.com/xGhst0/skyhawk/main/install.ps1 -o install.ps1 && powershell -ExecutionPolicy Bypass -File install.ps1`</sub>
+## Air-gapped install
 
-### Air-gapped target (Ubuntu / Linux box with NO internet)
-
-On any machine **with** internet, build a fully self-contained bundle — SKYHAWK
-plus the Node.js runtime, i.e. everything it needs, checksum-verified:
+For a box with no internet at all, build a self-contained bundle on a machine
+that *does* have internet. It packs SKYHAWK together with the Node.js runtime,
+checksum-verified against nodejs.org, into a single tarball.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xGhst0/skyhawk/main/bundle-airgap.sh | bash
 ```
 
-Carry the resulting `skyhawk-airgap-linux-x64.tar.gz` (~46 MB) across on
-removable media, then on the air-gapped machine:
+Carry `skyhawk-airgap-linux-x64.tar.gz` (~46 MB) across on removable media, then
+on the offline host:
 
 ```bash
 tar -xzf skyhawk-airgap-linux-x64.tar.gz && ./skyhawk-airgap/run.sh
 ```
 
-That's it — no internet, no `apt`, no `npm`, no installs. The app has zero npm
-dependencies, so the bundle's Node runtime is the *only* dependency and it ships
-inside the tarball. For an ARM target build with `ARCH=arm64`.
-
-The installer ensures Node.js 18+ is present (installs it if missing - `nvm` on
-Linux/macOS, `winget` on Windows), downloads SKYHAWK, and **starts it as a
-background service on port 8462** - it keeps running after you close the terminal
-and **restarts on boot/logon**. When it's up it opens **http://localhost:8462**.
-
-- Linux/macOS: a `systemd --user` service (falls back to `nohup` + an `@reboot`
-  cron entry if systemd isn't available).
-- Windows: a Scheduled Task that runs at logon (and it starts immediately).
-
-### Already have Node.js? Clone and go
-
-```bash
-git clone https://github.com/xGhst0/skyhawk && cd skyhawk
-node server.js        # or: npm start
-```
-
-There is **nothing to build and nothing to `npm install`** - the app is plain
-Node using only built-in modules.
-
-## Managing the service
-
-**Linux / macOS**
-```bash
-systemctl --user status skyhawk      # is it running?
-systemctl --user restart skyhawk     # restart
-systemctl --user stop skyhawk        # stop
-systemctl --user disable --now skyhawk   # uninstall the service
-# (nohup fallback) stop with:  pkill -f skyhawk/server.js
-```
-
-**Windows (PowerShell)**
-```powershell
-Get-ScheduledTask SKYHAWK            # is it registered?
-Stop-ScheduledTask -TaskName SKYHAWK; Get-Process node | Stop-Process   # stop
-Unregister-ScheduledTask -TaskName SKYHAWK -Confirm:$false              # uninstall
-```
+No `apt`, no `npm`, no installer. The bundled runtime is the only dependency and
+it travels inside the tarball. Building for ARM? Add `ARCH=arm64`.
 
 ## First sign-in
 
-The sign-in screen is seeded with accounts (password `skyhawk` - **change these in
-production**):
+The login screen is seeded with four accounts (password `skyhawk` — change these
+before any real use):
 
-| Name | Title | Role |
-|------|-------|------|
-| Morgan | Manager | full control incl. freezing & signing the formal report |
-| Chen | Tech Lead | controls the technical report, can edit any finding |
-| Rivera | Analyst | create/edit own findings |
-| Patel | Analyst | create/edit own findings |
+| Name | Role | Can |
+|------|------|-----|
+| Morgan | Manager | everything, including freezing and signing the formal report |
+| Chen | Tech Lead | curate the technical report, edit any finding, task collections |
+| Rivera | Analyst | create and edit their own findings |
+| Patel | Analyst | create and edit their own findings |
 
-New users can self-register and pick a title.
+New users can register and pick a role from the login screen.
 
-## What it does
-
-- **Role-based access** (Analyst / Tech Lead / Manager) with real authentication -
-  hashed passwords (scrypt) and server-side sessions; identity comes from the
-  session, not the client.
-- **Tabbed workspace** - Findings, Timeline, IOCs, Tasks, Network map, Report and
-  Audit tabs.
-- **Case lifecycle** - status workflow (open → contained → eradicated → recovered
-  → closed), case severity, and a case lead, all controlled by Tech Leads /
-  Managers and shown on the portfolio.
-- **Evidence ingestion (offline)** - an **Ingest** tab parses structured tool
-  exports locally and maps them straight into the case as timeline events, IOCs
-  and findings, deduped against what's already there. First profile: **Chainsaw**
-  (WithSecure) Sigma-hunt CSV/JSON - detections become findings (with the ATT&CK
-  technique pulled from the rule tags), event rows become timeline entries, and
-  IPs/domains/hashes are auto-extracted as IOCs. Pure-JS parsers, no dependencies.
-- **Collection agents** - a read-only PowerShell agent (`agent/skyhawk-agent.ps1`)
-  you deploy to hosts on your network. It enrols to your server with a shared
-  token, and analysts queue a **collection** from the **Agents** tab; the agent
-  runs a *fixed catalogue* of read-only collectors (host triage - processes,
-  network connections, logon events, autoruns, services; or a bundled Chainsaw
-  run) and uploads the results, which ingest straight into the case. It is a
-  forensic **collector, not a remote-command channel** and not self-propagating -
-  deploy it with your own admin tooling (GPO / scheduled task).
-- **Findings with full evidence** - affected systems (typed devices), screenshots
-  (SHA-256 hashed on upload for integrity), verbatim queries, tools used; editable
-  after creation. Approved findings appear in the technical report.
-- **Incident timeline** - reconstruct the attack chronologically (time, source,
-  event); rendered into the technical report.
-- **IOC tracking** - indicators auto-typed (IP, domain, URL, email, MD5/SHA-1/
-  SHA-256, CVE, path), one-click **extraction from finding text**, copy buttons,
-  and an IOC appendix in the technical report.
-- **Response checklists** - offline PICERL playbooks (ransomware, BEC, malware,
-  generic) plus custom tasks, with per-phase grouping and a progress bar.
-- **Editable network map** - a full drag-and-drop builder for the whole
-  environment: add/link/position devices, set compromise state, edit IPs. Findings
-  can seed it ("Sync from findings"), but you own it. Saved per investigation.
-- **MITRE ATT&CK helper** - a searchable offline cheat sheet covering the **full
-  ATT&CK Enterprise matrix (all ~200 techniques across 14 tactics)** plus a
-  keyword suggester ("Suggest from finding") so analysts don't need to know
-  technique IDs.
-- **Response advisor** - every finding has a one-click **⚡ Advice** button that
-  builds a tailored, copy-pasteable response plan entirely offline. It reads the
-  finding's ATT&CK techniques, its affected systems and the case's IOCs, then
-  lays out concrete steps by phase - preserve evidence, contain, eradicate,
-  recover, block indicators, harden - with the actual commands the analyst runs.
-  It names the real hosts (e.g. *firewall-isolate WEB01 (10.0.1.20)*, *kill the
-  attacker's SSH session on DC01*), rolls the right credentials (AD resets,
-  krbtgt double-reset after DC compromise, LAPS), and generates per-IOC block
-  rules for Windows/Linux firewalls, DNS and EDR - each with a **copy** button
-  and a one-line "why". Deterministic knowledge base (`domain/remediation.js`),
-  no network, no LLM. **Every ATT&CK technique is covered**: ~40 have detailed
-  technique-specific playbooks, and every other technique falls back to solid,
-  phase-appropriate guidance for its tactic (sub-techniques inherit their
-  parent's playbook).
-- **Technical report** - live, full, credited; printable to PDF. Now includes the
-  incident timeline, IOC appendix and evidence hashes.
-- **Formal report workflow** - leads flag approved findings into the formal
-  report and write plain-language summaries (with a fully offline draft
-  assistant); a Manager freezes & signs an immutable, versioned snapshot. Analyst
-  names and raw technical detail are excluded by policy.
-- **Tamper-evident audit chain**, persisted and re-verified after restart - now
-  with an in-app Audit tab showing the verified hash chain per case.
-- **Case bundles (air-gap transfer)** - export a whole investigation (findings,
-  evidence images, timeline, IOCs, tasks, audit chain) as one JSON file and
-  import it on another SKYHAWK instance; the audit chain is re-verified on import.
-- **Full backup** - one-click Manager-only JSON dump of every collection.
-- **Global search** - one box searches case IDs/titles, finding text and IOC
-  values across all investigations.
-- **Team chat** - a shared Team channel plus private DMs, all history saved, with unread badges/alerts.
-- **Appearance** - per-account theme (4 palettes) + hawk mark, saved to the account.
-- **Store seam** - file by default; Postgres with one env flip (`STORE=postgres`).
-- **Structured logging** to console + `skyhawk.log`.
+<table>
+  <tr>
+    <td><img src="assets/advisor.png" alt="Response advisor with copy-paste commands"></td>
+    <td><img src="assets/ingest.png" alt="Chainsaw ingest preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Response advisor — copy-paste containment per finding</sub></td>
+    <td align="center"><sub>Ingest — a Chainsaw export mapped into the case</sub></td>
+  </tr>
+</table>
 
 ## Collection agents
 
-SKYHAWK can pull read-only triage from hosts on your network. This is a
-**forensic collector for authorised incident response** — not a remote-command
-channel, not an EDR agent, and not self-propagating. Deploy it to machines you
-administer using your own tooling.
+SKYHAWK can pull read-only triage from hosts on your network. This is a forensic
+collector for authorised incident response, not an EDR and not a remote-command
+channel. You deploy it to machines you administer with your own tooling.
 
-**1. Set an enrolment token** on the server (otherwise one is generated per boot
-and printed to the log):
+1. Set an enrolment secret on the server (otherwise one is generated per boot and
+   printed to the log):
 
-```bash
-SKYHAWK_ENROLL_TOKEN=your-long-shared-secret node server.js
-```
+   ```bash
+   SKYHAWK_ENROLL_TOKEN=your-shared-secret node server.js
+   ```
 
-**2. Deploy `agent/skyhawk-agent.ps1`** to a Windows host (via GPO, a Scheduled
-Task, SCCM, or an admin session) and start it in poll mode:
+2. Drop `agent/skyhawk-agent.ps1` onto a Windows host via GPO, a scheduled task,
+   or an admin session, and start it. The **Agents** tab shows the exact command
+   with your token filled in.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
-  -Server https://skyhawk.lan:8462 -EnrollToken your-long-shared-secret
-```
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
+     -Server https://skyhawk.lan:8462 -EnrollToken your-shared-secret
+   ```
 
-The **Agents** tab (Manager view) shows the exact command with your token
-pre-filled. The agent enrols, then polls for work.
+3. In a case, open **Agents**, pick a host and a collector, and hit **Collect**.
+   The results ingest straight into that case and the whole thing is recorded in
+   the audit chain.
 
-**3. Queue a collection.** In a case, open **Agents**, pick a host and a
-collector, and hit **Collect → INC-…**. Results ingest straight into that case.
+<details>
+<summary>Collectors and guardrails</summary>
 
-| Collector | Collects (read-only) |
-|-----------|----------------------|
-| `triage` | processes + command lines, established network connections, recent logon events (4624/4625), autoruns (Run keys), non-system services |
-| `chainsaw` | runs a bundled `chainsaw.exe` over local event logs and uploads the detections (falls back to `triage` if Chainsaw isn't present) |
+| Collector | Gathers (read-only) |
+|-----------|---------------------|
+| `triage` | processes and command lines, established network connections, recent logon events (4624/4625), Run-key autoruns, non-system services |
+| `chainsaw` | runs a bundled `chainsaw.exe` over the local event logs and uploads the detections (falls back to `triage` if Chainsaw is not present) |
 
-**One-shot mode** (collect once into a case and exit — handy for a scheduled
-sweep):
+The server can only ask an agent to run one of the collectors above. It cannot
+send arbitrary commands. The agent is read-only, authenticates with a per-host
+token, does nothing to hide itself, and is one readable PowerShell script.
+Queuing a collection needs the Tech Lead role. There is also a `-Once` mode for a
+scheduled sweep — see the top of the script.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
-  -Server http://skyhawk.lan:8462 -EnrollToken <token> -Once -Collector triage -CaseId INC-2043
-```
-
-**Guardrails, by design:** the server can only ask an agent to run one of the
-fixed collectors above — never an arbitrary command. The agent is read-only,
-authenticates with a per-host token, does nothing to hide itself, and its whole
-source is one readable PowerShell script. Tasking a collection requires the
-**Tech Lead** capability and is recorded in the case audit chain.
+</details>
 
 ## Configuration
 
-| Env var | Default | Notes |
-|---------|---------|-------|
-| `PORT` | `8462` | HTTP port |
+<details>
+<summary>Environment variables</summary>
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `PORT` | `8462` | HTTP(S) port |
 | `STORE` | `file` | `file` or `postgres` |
-| `DATABASE_URL` | - | required when `STORE=postgres` (needs `npm i pg`) |
-| `DEBUG` | - | set to `1` for verbose request logs |
-| `SKYHAWK_ENROLL_TOKEN` | *(random per boot)* | shared secret a collection agent presents to enrol |
-| `TLS_CERT` / `TLS_KEY` | - | paths to a cert + key; when both are set SKYHAWK serves **HTTPS** and the session cookie becomes `Secure` |
+| `DATABASE_URL` | — | required when `STORE=postgres` (needs `npm i pg`) |
+| `SKYHAWK_ENROLL_TOKEN` | random per boot | shared secret a collection agent presents to enrol |
+| `TLS_CERT` / `TLS_KEY` | — | when both are set, SKYHAWK serves HTTPS and marks the session cookie `Secure` |
+| `DEBUG` | — | set to `1` for verbose request logs |
 
-## Run it as a service (optional)
+</details>
 
-Linux (systemd), after installing to `~/skyhawk`:
+<details>
+<summary>HTTPS</summary>
+
+Generate a local self-signed cert and serve over TLS:
+
+```bash
+./gen-cert.sh
+TLS_CERT=cert.pem TLS_KEY=key.pem node server.js
+```
+
+In production, point `TLS_CERT` / `TLS_KEY` at a real certificate or terminate
+TLS at a reverse proxy.
+
+</details>
+
+<details>
+<summary>Run as a service</summary>
+
+The installers register a service for you (a `systemd --user` unit on Linux/macOS,
+a Scheduled Task on Windows). To do it by hand on Linux:
 
 ```ini
 # /etc/systemd/system/skyhawk.service
@@ -250,33 +238,36 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
-## HTTPS (TLS)
-
-Generate a local self-signed cert and run over HTTPS:
-
-```bash
-./gen-cert.sh
-TLS_CERT=cert.pem TLS_KEY=key.pem node server.js   # serves https://localhost:8462
-```
-
-In production, point `TLS_CERT`/`TLS_KEY` at a real certificate (or terminate TLS
-at a reverse proxy). When TLS is on, the session cookie is issued with `Secure`
-in addition to `HttpOnly` and `SameSite=Strict`.
+</details>
 
 ## Security
 
-- **Runs offline** - the only published port is the app; no telemetry, no cloud.
-- **Auth** - scrypt-hashed passwords, HttpOnly server-side session cookies;
-  identity is taken from the session, never trusted from the client.
-- **Login rate-limiting** - 5 failed attempts per IP+name triggers a 15-minute
-  lockout (returns HTTP 429).
-- **Tamper-evident audit chain** per investigation, persisted and re-verified.
-- Change the seeded passwords before any real use.
+SKYHAWK is built to be defensible. It runs offline with no telemetry, hashes
+evidence on upload, and keeps a tamper-evident audit chain per case that breaks
+visibly if anyone edits history. Auth is scrypt-hashed with server-side sessions,
+and login is rate-limited (five failed attempts per IP and name triggers a
+15-minute lockout).
 
-The `PostgresStore` path has been validated at the SQL level (create/upsert/
-select/delete) against an in-process Postgres engine; run your own load test
-against your Postgres before production.
+Before any real deployment: change the seeded passwords, set
+`SKYHAWK_ENROLL_TOKEN`, and turn on TLS. See [SECURITY.md](SECURITY.md) for the
+hardening checklist, the collection agent's authorised-use policy, and how to
+report a vulnerability.
+
+## Roadmap
+
+1.x covers the full loop from finding to signed report. The 2.0 line is about
+turning a case notebook into a platform an enclave runs on:
+
+- **Ingest, don't retype** — parsers for Sysmon, EVTX, PCAP and EDR exports on
+  top of the Chainsaw pipeline that shipped first.
+- **Offline intelligence** — the full ATT&CK object model, cross-case IOC
+  correlation, and Sigma detection mapping.
+- **Real-time collaboration** — presence, case queues, and concurrent-safe edits.
+- **Defensible by construction** — chain of custody, offline signing, dual-control
+  freeze, and a court-ready export.
+- **Reporting that fits the audience** — a template engine with real DOCX/PDF and
+  framework mappings (ACSC ISM, NIST 800-61, ISO 27035).
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
