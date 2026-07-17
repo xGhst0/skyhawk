@@ -352,7 +352,7 @@ function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(function(){lo
 buildAppx(uid);initPrefs(uid);
 document.getElementById('rlink').href='/investigations/'+encodeURIComponent(INV)+'/report/technical';
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({actorId:uid},b||{}))});const j=await r.json().catch(()=>({}));if(!r.ok){alert(j.error||'error');throw new Error(j.error);}return j;}
-function showTab(t){['findings','ingest','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
+function showTab(t){['findings','ingest','agents','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
   if(t==='report'){refreshReport();}
   if(t==='map'){mRender();}
   if(t==='audit'){loadAudit();}

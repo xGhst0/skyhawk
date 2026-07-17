@@ -141,8 +141,16 @@ New users can register and pick a role from the login screen.
     <td><img src="assets/ingest.png" alt="Chainsaw ingest preview"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Response advisor — copy-paste containment per finding</sub></td>
-    <td align="center"><sub>Ingest — a Chainsaw export mapped into the case</sub></td>
+    <td align="center"><sub>Response advisor: copy-paste containment per finding</sub></td>
+    <td align="center"><sub>Ingest: a Chainsaw export mapped into the case</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/map.png" alt="Network map showing the intrusion path"></td>
+    <td><img src="assets/report.png" alt="Frozen, signed formal report"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Network map: the intrusion path across zones</sub></td>
+    <td align="center"><sub>The signed, frozen formal report</sub></td>
   </tr>
 </table>
 
@@ -151,6 +159,10 @@ New users can register and pick a role from the login screen.
 SKYHAWK can pull read-only triage from hosts on your network. This is a forensic
 collector for authorised incident response, not an EDR and not a remote-command
 channel. You deploy it to machines you administer with your own tooling.
+
+<p align="center">
+  <img src="assets/agents.png" alt="Collection agents tab with enrolled hosts" width="820">
+</p>
 
 1. Set an enrolment secret on the server (otherwise one is generated per boot and
    printed to the log):
