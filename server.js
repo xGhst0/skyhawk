@@ -13,9 +13,14 @@ const { Finding, User, Role, TechnicalPolicy, FormalPolicy, Report, AuditLog, Of
 const pages = require("./pages.js");
 const attack = require("./attack.js");
 const remediation = require("./domain/remediation.js");
+const ingest = require("./domain/ingest.js");
 
 const PORT = process.env.PORT || 8462;
 const useTLS = !!(process.env.TLS_CERT && process.env.TLS_KEY);
+// Collection-agent enrollment secret. Operators SHOULD set SKYHAWK_ENROLL_TOKEN;
+// otherwise a random one is generated per boot and printed to the log.
+const AGENT_ENROLL = process.env.SKYHAWK_ENROLL_TOKEN || crypto.randomBytes(12).toString("hex");
+const COLLECTORS = ["triage", "chainsaw"];
 const store = makeStore(log);
 const assist = new OfflineDraftAssist();
 const EVID = path.join(__dirname, "evidence");
@@ -167,6 +172,127 @@ async function recordsFor(invId) { return (await store.all("findings")).filter((
 // ---------- per-investigation sub-collections (timeline / iocs / tasks) ----------
 async function subDoc(coll, invId) { const r = await store.get(coll, invId); return r && Array.isArray(r.items) ? r.items : []; }
 async function subSave(coll, invId, items) { await store.put(coll, { id: invId, items }); return items; }
+
+// ---------- evidence ingestion (offline; writes selected parsed items) ----------
+// Shared writer used by both the manual Ingest tab and the collection agent.
+async function writeIngested(invId, actorId, actorName, sel, src) {
+  const res = { timeline: 0, iocs: 0, findings: 0 };
+  if (Array.isArray(sel.timeline) && sel.timeline.length) {
+    const items = await subDoc("timeline", invId);
+    for (const e of sel.timeline) {
+      const text = (e.text || "").toString().trim().slice(0, 500); if (!text) continue;
+      const at = e.at && !isNaN(Date.parse(e.at)) ? new Date(e.at).toISOString() : new Date().toISOString();
+      items.push({ id: mkId("T"), at, text, source: (e.source || src).toString().slice(0, 40), findingId: null, by: actorId });
+      res.timeline++;
+    }
+    items.sort((x, y) => (x.at < y.at ? -1 : 1));
+    await subSave("timeline", invId, items);
+  }
+  if (Array.isArray(sel.iocs) && sel.iocs.length) {
+    const items = await subDoc("iocs", invId);
+    const seen = new Set(items.map((x) => x.value.toLowerCase()));
+    for (const x of sel.iocs) {
+      const value = (x.value || "").toString().trim().slice(0, 300);
+      if (!value || seen.has(value.toLowerCase())) continue;
+      seen.add(value.toLowerCase());
+      items.push({ id: mkId("I"), type: IOC_TYPES.includes(x.type) ? x.type : iocType(value), value, note: (x.note || "ingested via " + src).slice(0, 200), by: actorId, at: new Date().toISOString() });
+      res.iocs++;
+    }
+    await subSave("iocs", invId, items);
+  }
+  for (const f of (sel.findings || [])) {
+    const title = (f.title || "").toString().trim(); if (!title) continue;
+    const fd = new Finding(mkId("F"), invId, title.slice(0, 200), (f.technicalDetail || "").toString(), SEVERITIES.includes(f.severity) ? f.severity : "medium", actorId, Array.isArray(f.attack) ? f.attack.filter(Boolean) : []);
+    fd.createdAt = new Date().toISOString(); fd.submit(new User(actorId, actorName || actorId, Role.Analyst));
+    const assets = (f.assets || []).filter((a) => a && a.name).map((a) => ({ type: a.type || "host", name: String(a.name).slice(0, 80), ip: a.ip ? String(a.ip).slice(0, 60) : "" }));
+    await store.put("findings", { ...dehydrate(fd), assets, screenshots: [], queries: [], tools: [], ingested: src });
+    res.findings++;
+  }
+  return res;
+}
+async function ingestCommit(invId, b) {
+  const actor = requireCap(b.actorId, "finding.create");
+  await getInv(invId);
+  const src = (b.source || "ingest").toString().slice(0, 40);
+  const res = await writeIngested(invId, actor.id, actor.name, b, src);
+  await auditRecord(invId, actor.id, "case.ingested", invId, { source: src, ...res });
+  log.info("case.ingested", { inv: invId, source: src, ...res });
+  return res;
+}
+
+// ---------- collection agents (read-only host triage; authorised IR use) ----------
+// The agent authenticates with its own token (not a user session). The server
+// can only queue tasks from a FIXED collector catalogue — never arbitrary
+// commands — so this is a forensic collector, not a remote-execution channel.
+const ctEq = (a, b) => { a = String(a || ""); b = String(b || ""); if (!a.length || a.length !== b.length) return false; try { return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; } };
+async function agentAuth(id, token) { const a = await store.get("agents", id); if (!a || !ctEq(token, a.token)) return null; return a; }
+async function agentEnroll(b) {
+  if (!ctEq(b.enrollToken, AGENT_ENROLL)) { const e = new Error("invalid enrollment token"); e.code = 403; throw e; }
+  const host = (b.host || "unknown-host").toString().slice(0, 80);
+  const token = crypto.randomBytes(24).toString("hex");
+  let a = (await store.all("agents")).find((x) => x.name.toLowerCase() === host.toLowerCase());
+  if (a) { a.token = token; a.os = (b.os || a.os || "").toString().slice(0, 160); a.lastSeen = Date.now(); }
+  else a = { id: mkId("AG"), name: host, os: (b.os || "").toString().slice(0, 160), token, enrolledAt: Date.now(), lastSeen: Date.now() };
+  await store.put("agents", a);
+  log.info("agent.enrolled", { id: a.id, host });
+  return { agentId: a.id, agentToken: token, pollSeconds: 15, collectors: COLLECTORS };
+}
+async function agentPoll(id, token) {
+  const a = await agentAuth(id, token); if (!a) { const e = new Error("agent auth failed"); e.code = 403; throw e; }
+  a.lastSeen = Date.now(); await store.put("agents", a);
+  const tasks = (await store.all("agentTasks")).filter((t) => t.agentId === id && t.status === "pending");
+  for (const t of tasks) { t.status = "dispatched"; t.dispatchedAt = Date.now(); await store.put("agentTasks", t); }
+  return { tasks: tasks.map((t) => ({ id: t.id, collector: t.collector, invId: t.invId })) };
+}
+async function agentResults(b) {
+  const a = await agentAuth(b.id, b.token); if (!a) { const e = new Error("agent auth failed"); e.code = 403; throw e; }
+  const task = b.taskId ? await store.get("agentTasks", b.taskId) : null;
+  const invId = (task && task.invId) || b.invId;
+  if (!invId) throw new Error("no target case for results");
+  await getInv(invId);
+  const text = b.text != null ? String(b.text) : JSON.stringify(b.data || {});
+  const parsed = ingest.parse(text, b.filename || (a.name + ".json"), b.profile);
+  let committed = { timeline: 0, iocs: 0, findings: 0 };
+  const authorId = (task && task.createdBy) || ("agent:" + a.id);
+  const authorName = (task && task.createdByName) || a.name;
+  if (!parsed.error) committed = await writeIngested(invId, authorId, authorName, parsed, "agent:" + a.name);
+  if (task) { task.status = "done"; task.completedAt = Date.now(); task.result = committed; task.profile = parsed.profile || null; await store.put("agentTasks", task); }
+  a.lastSeen = Date.now();
+  a.lastCollection = { at: Date.now(), collector: (task && task.collector) || b.collector || "adhoc", invId, result: committed };
+  await store.put("agents", a);
+  await auditRecord(invId, "agent:" + a.id, "agent.collected", a.name, { collector: (task && task.collector) || b.collector || "adhoc", profile: parsed.profile || null, ...committed });
+  log.info("agent.collected", { agent: a.name, inv: invId, ...committed });
+  return { ok: true, profile: parsed.profile || null, error: parsed.error || null, ...committed };
+}
+async function agentList() {
+  const tasks = await store.all("agentTasks");
+  return (await store.all("agents")).map((a) => {
+    const mine = tasks.filter((t) => t.agentId === a.id);
+    const lastTask = mine.filter((t) => t.status === "done").sort((x, y) => (y.completedAt || 0) - (x.completedAt || 0))[0];
+    const last = a.lastCollection || (lastTask ? { at: lastTask.completedAt, collector: lastTask.collector, invId: lastTask.invId, result: lastTask.result } : null);
+    return { id: a.id, name: a.name, os: a.os, enrolledAt: a.enrolledAt, lastSeen: a.lastSeen,
+      online: Date.now() - a.lastSeen < 60000, pending: mine.filter((t) => t.status === "pending" || t.status === "dispatched").length,
+      lastCollection: last };
+  }).sort((a, b) => b.lastSeen - a.lastSeen);
+}
+async function agentCollect(agentId, b) {
+  const actor = requireCap(b.actorId, "tech.control");
+  const a = await store.get("agents", agentId); if (!a) throw new Error("unknown agent");
+  const collector = COLLECTORS.includes(b.collector) ? b.collector : "triage";
+  if (!b.invId) throw new Error("choose a target case");
+  await getInv(b.invId);
+  const t = { id: mkId("TK"), agentId, invId: b.invId, collector, status: "pending", createdBy: actor.id, createdByName: actor.name, createdAt: Date.now() };
+  await store.put("agentTasks", t);
+  await auditRecord(b.invId, actor.id, "agent.tasked", a.name, { collector });
+  log.info("agent.tasked", { agent: a.name, collector, inv: b.invId, by: actor.id });
+  return { ok: true, taskId: t.id };
+}
+async function agentRemove(agentId, b) {
+  requireCap(b.actorId, "user.manage");
+  await store.remove("agents", agentId);
+  for (const t of (await store.all("agentTasks")).filter((t) => t.agentId === agentId)) await store.remove("agentTasks", t.id);
+  log.info("agent.removed", { id: agentId }); return { ok: true };
+}
 
 // ---------- incident timeline ----------
 const TL_SOURCES = ["analyst", "EDR", "firewall", "proxy", "DNS", "auth logs", "email", "backup", "netflow", "other"];
@@ -537,6 +663,10 @@ const handler = async (req, res) => {
   }
   if (p === "/api/auth/logout" && req.method === "POST") { const t = parseCookie(req); if (t) await dropSession(t); res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": "sky_sid=; Path=/; Max-Age=0" }); return res.end("{}"); }
   if (p === "/api/me") return actor ? send(res, 200, { ...pub(actor), caps: capsFor(actor.title) }) : send(res, 401, { error: "not signed in" });
+  // ---- collection-agent endpoints: token-authenticated, not session-gated ----
+  if (p === "/api/agents/enroll" && req.method === "POST") { try { return send(res, 201, await agentEnroll(await readBodyRaw(req))); } catch (e) { return send(res, e.code === 403 ? 403 : 400, { error: String(e.message || e) }); } }
+  if (p === "/api/agents/poll" && req.method === "POST") { try { const b = await readBodyRaw(req); return send(res, 200, await agentPoll(b.id, b.token)); } catch (e) { return send(res, e.code === 403 ? 403 : 400, { error: String(e.message || e) }); } }
+  if (p === "/api/agents/results" && req.method === "POST") { try { return send(res, 201, await agentResults(await readBodyRaw(req))); } catch (e) { return send(res, e.code === 403 ? 403 : 400, { error: String(e.message || e) }); } }
   const needsAuth = isReport || p.startsWith("/evidence/") || p.startsWith("/api/");
   if (needsAuth && !actor) { if (isReport) { res.writeHead(302, { Location: "/login" }); return res.end(); } return send(res, 401, { error: "not signed in" }); }
   try {
@@ -582,6 +712,19 @@ const handler = async (req, res) => {
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/tasks$/)) && req.method === "POST") return send(res, 201, await tasksAdd(m[1], await rb()));
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/tasks\/([^/]+)\/toggle$/)) && req.method === "POST") return send(res, 200, await taskToggle(m[1], m[2], await rb()));
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/tasks\/([^/]+)\/remove$/)) && req.method === "POST") return send(res, 200, await taskRemove(m[1], m[2], await rb()));
+    if (p === "/api/ingest/profiles") return send(res, 200, ingest.profiles());
+    if (p === "/api/agents" && req.method === "GET") return send(res, 200, await agentList());
+    if (p === "/api/agents/config") { requireCap(actor.id, "user.manage"); return send(res, 200, { enrollToken: AGENT_ENROLL, collectors: COLLECTORS, tls: useTLS, port: PORT }); }
+    if ((m = p.match(/^\/api\/agents\/([^/]+)\/collect$/)) && req.method === "POST") return send(res, 201, await agentCollect(m[1], await rb()));
+    if ((m = p.match(/^\/api\/agents\/([^/]+)\/remove$/)) && req.method === "POST") return send(res, 200, await agentRemove(m[1], await rb()));
+    if ((m = p.match(/^\/api\/investigations\/([^/]+)\/ingest\/preview$/)) && req.method === "POST") {
+      requireCap(actor.id, "finding.create"); await getInv(m[1]); const b = await rb();
+      const parsed = ingest.parse(b.text || "", b.filename || "", b.profile);
+      if (parsed.error) return send(res, 200, parsed);
+      const existing = { timeline: await subDoc("timeline", m[1]), iocs: await subDoc("iocs", m[1]), findings: await recordsFor(m[1]) };
+      return send(res, 200, ingest.dedupe(parsed, existing));
+    }
+    if ((m = p.match(/^\/api\/investigations\/([^/]+)\/ingest\/commit$/)) && req.method === "POST") return send(res, 201, await ingestCommit(m[1], await rb()));
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/map$/)) && req.method === "POST") { requireCap(actor.id, "finding.create"); const b = await rb(); const inv = await getInv(m[1]); inv.map = { nodes: Array.isArray(b.nodes) ? b.nodes : [], edges: Array.isArray(b.edges) ? b.edges : [] }; await store.put("investigations", inv); log.info("map.saved", { inv: m[1], nodes: inv.map.nodes.length }); return send(res, 200, inv.map); }
     if (p === "/api/attack") return send(res, 200, { tactics: attack.tactics, techniques: attack.techniques });
     if (p === "/api/attack/suggest" && req.method === "POST") { const b = await rb(); return send(res, 200, attack.suggest(b.text || "")); }
@@ -601,4 +744,7 @@ const handler = async (req, res) => {
 };
 const server = useTLS ? https.createServer({ cert: fs.readFileSync(process.env.TLS_CERT), key: fs.readFileSync(process.env.TLS_KEY) }, handler) : http.createServer(handler);
 
-loadUsers().then(loadSessions).then(seedIfEmpty).then(() => server.listen(PORT, () => log.info("listening", { url: `${useTLS ? "https" : "http"}://localhost:${PORT}`, store: process.env.STORE || "file", tls: useTLS })));
+loadUsers().then(loadSessions).then(seedIfEmpty).then(() => server.listen(PORT, () => {
+  log.info("listening", { url: `${useTLS ? "https" : "http"}://localhost:${PORT}`, store: process.env.STORE || "file", tls: useTLS });
+  if (!process.env.SKYHAWK_ENROLL_TOKEN) log.warn("agent.enroll.token", { token: AGENT_ENROLL, note: "generated for this boot — set SKYHAWK_ENROLL_TOKEN to make it persistent" });
+}));

@@ -230,6 +230,8 @@ function workspace(id) {
 <div class="row" id="invctl" style="margin-bottom:10px"></div>
 <div class="tabs">
   <div class="tab on" onclick="showTab('findings')" id="tab-findings">Findings</div>
+  <div class="tab" onclick="showTab('ingest')" id="tab-ingest">Ingest</div>
+  <div class="tab" onclick="showTab('agents')" id="tab-agents">Agents</div>
   <div class="tab" onclick="showTab('timeline')" id="tab-timeline">Timeline</div>
   <div class="tab" onclick="showTab('iocs')" id="tab-iocs">IOCs</div>
   <div class="tab" onclick="showTab('tasks')" id="tab-tasks">Tasks</div>
@@ -270,6 +272,22 @@ function workspace(id) {
   <div class="empty" style="margin-bottom:8px">Drag devices to arrange · drag the dot onto another device to link · click a device to edit it. Build the whole environment; findings can seed it.</div>
   <div style="overflow:auto"><div class="mcanvas" id="mcanvas"></div></div>
   <div class="card" id="mdetail" style="margin-top:10px"></div>
+</div>
+<div class="panel" id="p-ingest">
+  <h2>Ingest evidence</h2>
+  <div class="card">
+    <div class="k" style="margin-bottom:8px">Drop a structured tool export — <b>Chainsaw</b> Sigma-hunt CSV/JSON today. It's parsed <b>locally</b> and mapped to timeline events, IOCs and findings; nothing leaves this machine. Review and pick what to import.</div>
+    <div class="row" style="margin-bottom:8px"><input type="file" id="ingFile" accept=".csv,.json,.jsonl,.ndjson,.tsv" style="flex:1;min-width:180px"><select id="ingProfile" style="width:190px"><option value="">auto-detect profile</option></select><button onclick="ingAnalyze()">Analyze</button></div>
+    <textarea id="ingText" style="width:100%;min-height:64px" placeholder="…or paste the export contents here"></textarea>
+    <div class="k" id="ingStatus" style="margin-top:6px"></div>
+  </div>
+  <div id="ingPreview"></div>
+</div>
+<div class="panel" id="p-agents">
+  <div class="row" style="justify-content:space-between;margin-bottom:6px"><h2 style="margin:0">Collection agents</h2><button class="ghost" onclick="loadAgents()">Refresh</button></div>
+  <div class="empty" style="margin-bottom:10px">Read-only forensic collectors deployed to hosts on your network. Queue a collection and the results land in <b>this case</b>. Authorised IR use only — agents never run arbitrary commands and never modify the host.</div>
+  <div id="agentEnroll"></div>
+  <div id="agentList"></div>
 </div>
 <div class="panel" id="p-timeline">
   <h2>Add event</h2>
@@ -334,10 +352,12 @@ function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(function(){lo
 buildAppx(uid);initPrefs(uid);
 document.getElementById('rlink').href='/investigations/'+encodeURIComponent(INV)+'/report/technical';
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({actorId:uid},b||{}))});const j=await r.json().catch(()=>({}));if(!r.ok){alert(j.error||'error');throw new Error(j.error);}return j;}
-function showTab(t){['findings','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
+function showTab(t){['findings','ingest','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
   if(t==='report'){refreshReport();}
   if(t==='map'){mRender();}
   if(t==='audit'){loadAudit();}
+  if(t==='ingest'){ingInitProfiles();}
+  if(t==='agents'){loadAgents();}
   if(t==='timeline'&&!document.getElementById('tlat').value){setTlNow();}}
 function dl(name,obj){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},4000);}
 async function postQ(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({actorId:uid},b||{}))});return r.json().catch(function(){return{};});}
@@ -536,6 +556,72 @@ async function loadAudit(){
     return '<div class="iocrow"><span class="mono" style="color:var(--mut)">#'+e.seq+'</span><span class="mono" style="white-space:nowrap">'+new Date(e.timestamp).toLocaleString()+'</span><b style="min-width:90px">'+esc(e.actorName)+'</b><span class="pill">'+esc(e.action)+'</span><span class="k" style="flex:1;word-break:break-all">'+esc(e.targetId)+'</span><span class="mono" title="'+esc(e.hash)+'" style="color:var(--mut)">'+esc((e.hash||'').slice(0,10))+'…</span></div>';
   }).join('')||'<div class="empty">No events recorded yet.</div>';
 }
+// ---- evidence ingestion ----
+let ingData=null,ingProfilesLoaded=false;
+async function ingInitProfiles(){if(ingProfilesLoaded)return;ingProfilesLoaded=true;try{const ps=await (await fetch('/api/ingest/profiles')).json();const sel=document.getElementById('ingProfile');ps.forEach(function(p){const o=document.createElement('option');o.value=p.id;o.textContent=p.label;sel.appendChild(o);});}catch(e){}}
+function ingReadFile(){return new Promise(function(res){const f=document.getElementById('ingFile');if(f.files&&f.files[0]){const rd=new FileReader();rd.onload=function(){res({text:rd.result,name:f.files[0].name});};rd.readAsText(f.files[0]);}else res({text:document.getElementById('ingText').value,name:''});});}
+async function ingAnalyze(){
+  const st=document.getElementById('ingStatus');st.textContent='Parsing locally…';
+  const src=await ingReadFile();
+  if(!src.text||!src.text.trim()){st.textContent='Choose a file or paste an export first.';return;}
+  const r=await post('/api/investigations/'+encodeURIComponent(INV)+'/ingest/preview',{text:src.text,filename:src.name,profile:document.getElementById('ingProfile').value});
+  if(r.error){st.textContent=r.error;document.getElementById('ingPreview').innerHTML='';return;}
+  ingData=r;
+  st.innerHTML='Parsed with <b>'+esc(r.profileLabel)+'</b> — '+r.findings.length+' findings, '+r.timeline.length+' timeline events, '+r.iocs.length+' IOCs ('+r.newCounts.findings+'/'+r.newCounts.timeline+'/'+r.newCounts.iocs+' new).';
+  renderIngest();
+}
+function ingGroup(title,key,items,render){
+  if(!items.length)return'';
+  const rows=items.map(function(it,i){return '<label class="iocrow" style="cursor:pointer"><input type="checkbox" data-ing="'+key+'" data-i="'+i+'"'+(it.dup?'':' checked')+'><span style="flex:1">'+render(it)+'</span>'+(it.dup?'<span class="badge b-mut">already in case</span>':'<span class="badge b-ok">new</span>')+'</label>';}).join('');
+  const newN=items.filter(function(x){return !x.dup;}).length;
+  return '<h2 style="margin-top:14px">'+esc(title)+' <span class="k">'+newN+' new / '+items.length+'</span> <a href="#" class="k" onclick="ingToggle('+Q+key+Q+',true);return false">all</a> · <a href="#" class="k" onclick="ingToggle('+Q+key+Q+',false);return false">none</a></h2>'+rows;
+}
+function renderIngest(){
+  const d=ingData;if(!d)return;
+  let h='';
+  h+=ingGroup('Findings','findings',d.findings,function(f){return '<span class="dot '+esc(f.severity)+'"></span><b>'+esc(f.title)+'</b> '+(f.attack||[]).map(function(a){return '<span class="pill">'+esc(a)+'</span>';}).join(' ')+(f.assets&&f.assets.length?'<span class="k"> · '+f.assets.map(function(a){return esc(a.name);}).join(', ')+'</span>':'');});
+  h+=ingGroup('Timeline events','timeline',d.timeline,function(e){return '<span class="mono" style="white-space:nowrap">'+esc((e.at||'').slice(0,16).replace('T',' '))+'</span> <span class="pill">'+esc(e.source)+'</span> '+esc(e.text);});
+  h+=ingGroup('IOCs','iocs',d.iocs,function(x){return '<span class="pill">'+esc(x.type)+'</span> <span class="mono">'+esc(x.value)+'</span>';});
+  h+='<div class="row" style="margin-top:12px"><button onclick="ingImport()">Import selected</button><span class="k" id="ingImportStatus"></span></div>';
+  document.getElementById('ingPreview').innerHTML=h;
+}
+function ingToggle(key,on){[].forEach.call(document.querySelectorAll('input[data-ing="'+key+'"]'),function(c){c.checked=on;});}
+async function ingImport(){
+  if(!ingData)return;
+  const pick=function(key,arr){return [].filter.call(document.querySelectorAll('input[data-ing="'+key+'"]'),function(c){return c.checked;}).map(function(c){return arr[+c.getAttribute('data-i')];});};
+  const body={source:ingData.profileLabel||'ingest',findings:pick('findings',ingData.findings),timeline:pick('timeline',ingData.timeline),iocs:pick('iocs',ingData.iocs)};
+  const total=body.findings.length+body.timeline.length+body.iocs.length;
+  if(!total){document.getElementById('ingImportStatus').textContent='Nothing selected.';return;}
+  document.getElementById('ingImportStatus').textContent='Importing '+total+'…';
+  const r=await post('/api/investigations/'+encodeURIComponent(INV)+'/ingest/commit',body);
+  document.getElementById('ingImportStatus').innerHTML='<span class="badge b-ok">imported</span> '+r.findings+' findings · '+r.timeline+' events · '+r.iocs+' IOCs';
+  ingData=null;document.getElementById('ingPreview').innerHTML='';document.getElementById('ingText').value='';document.getElementById('ingFile').value='';
+  sigF='';sigT='';sigI='';tick();
+}
+
+// ---- collection agents ----
+let agentEnrollShown=false;
+function ago(ts){if(!ts)return'never';const s=Math.floor((Date.now()-ts)/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+async function loadAgents(){
+  const box=document.getElementById('agentList');if(!box)return;
+  // Manager-only enrollment helper
+  if(!agentEnrollShown&&hasCap('user.manage')){agentEnrollShown=true;try{const c=await (await fetch('/api/agents/config')).json();if(!c.error){const proto=c.tls?'https':'http';document.getElementById('agentEnroll').innerHTML='<div class="card"><div class="k" style="margin-bottom:6px">Deploy the agent to a host (GPO / scheduled task), then enrol it:</div><div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+'enroll'+Q+')">copy</button><div class="cmd" id="enrollCmd">powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 -Server '+proto+'://'+location.hostname+':'+c.port+' -EnrollToken '+esc(c.enrollToken)+'</div></div></div>';}}catch(e){}}
+  let rows;try{rows=await (await fetch('/api/agents')).json();}catch(e){box.innerHTML='<div class="empty">Could not load agents.</div>';return;}
+  if(!rows.length){box.innerHTML='<div class="empty">No agents enrolled yet.'+(hasCap('user.manage')?' Use the command above to enrol one.':'')+'</div>';return;}
+  const canCollect=hasCap('tech.control');
+  box.innerHTML=rows.map(function(a){
+    const last=a.lastCollection?('last: '+a.lastCollection.collector+' → '+esc(a.lastCollection.invId)+' ('+a.lastCollection.result.findings+'f/'+a.lastCollection.result.timeline+'e/'+a.lastCollection.result.iocs+'i) '+ago(a.lastCollection.at)):'no collections yet';
+    const ctrl=canCollect?'<select id="col-'+a.id+'" style="width:110px"><option value="triage">triage</option><option value="chainsaw">chainsaw</option></select><button onclick="doCollect('+Q+a.id+Q+')">Collect → '+esc(INV)+'</button>'+(hasCap('user.manage')?'<button class="ghost" onclick="dropAgent('+Q+a.id+Q+')">remove</button>':''):'';
+    return '<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><span class="dot" style="background:'+(a.online?'var(--green)':'var(--mut)')+'"></span><b>'+esc(a.name)+'</b> <span class="k">'+esc(a.os||'')+'</span><div class="k" style="margin-top:3px">'+(a.online?'online':'seen '+ago(a.lastSeen))+(a.pending?' · '+a.pending+' pending':'')+' · '+last+'</div></div><div class="row" style="gap:6px">'+ctrl+'</div></div></div>';
+  }).join('');
+}
+async function doCollect(id){
+  const collector=document.getElementById('col-'+id).value;
+  try{await post('/api/agents/'+id+'/collect',{invId:INV,collector});loadAgents();}catch(e){}
+}
+async function dropAgent(id){if(!confirm('Remove this agent? It can re-enrol with the token.'))return;await post('/api/agents/'+id+'/remove');loadAgents();}
+function copyText(btn,which){var t=which==='enroll'?document.getElementById('enrollCmd').textContent:'';function ok(){var o=btn.textContent;btn.textContent='copied ✓';setTimeout(function(){btn.textContent=o;},1000);}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok).catch(function(){});}else ok();}
+
 function initSelects(s){
   document.getElementById('tlsrc').innerHTML=s.tlSources.map(function(x){return '<option>'+esc(x)+'</option>';}).join('');
   document.getElementById('tktpl').innerHTML=s.playbooks.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('');

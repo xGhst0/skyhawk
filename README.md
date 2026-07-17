@@ -111,6 +111,20 @@ New users can self-register and pick a title.
 - **Case lifecycle** - status workflow (open → contained → eradicated → recovered
   → closed), case severity, and a case lead, all controlled by Tech Leads /
   Managers and shown on the portfolio.
+- **Evidence ingestion (offline)** - an **Ingest** tab parses structured tool
+  exports locally and maps them straight into the case as timeline events, IOCs
+  and findings, deduped against what's already there. First profile: **Chainsaw**
+  (WithSecure) Sigma-hunt CSV/JSON - detections become findings (with the ATT&CK
+  technique pulled from the rule tags), event rows become timeline entries, and
+  IPs/domains/hashes are auto-extracted as IOCs. Pure-JS parsers, no dependencies.
+- **Collection agents** - a read-only PowerShell agent (`agent/skyhawk-agent.ps1`)
+  you deploy to hosts on your network. It enrols to your server with a shared
+  token, and analysts queue a **collection** from the **Agents** tab; the agent
+  runs a *fixed catalogue* of read-only collectors (host triage - processes,
+  network connections, logon events, autoruns, services; or a bundled Chainsaw
+  run) and uploads the results, which ingest straight into the case. It is a
+  forensic **collector, not a remote-command channel** and not self-propagating -
+  deploy it with your own admin tooling (GPO / scheduled task).
 - **Findings with full evidence** - affected systems (typed devices), screenshots
   (SHA-256 hashed on upload for integrity), verbatim queries, tools used; editable
   after creation. Approved findings appear in the technical report.
@@ -161,6 +175,53 @@ New users can self-register and pick a title.
 - **Store seam** - file by default; Postgres with one env flip (`STORE=postgres`).
 - **Structured logging** to console + `skyhawk.log`.
 
+## Collection agents
+
+SKYHAWK can pull read-only triage from hosts on your network. This is a
+**forensic collector for authorised incident response** — not a remote-command
+channel, not an EDR agent, and not self-propagating. Deploy it to machines you
+administer using your own tooling.
+
+**1. Set an enrolment token** on the server (otherwise one is generated per boot
+and printed to the log):
+
+```bash
+SKYHAWK_ENROLL_TOKEN=your-long-shared-secret node server.js
+```
+
+**2. Deploy `agent/skyhawk-agent.ps1`** to a Windows host (via GPO, a Scheduled
+Task, SCCM, or an admin session) and start it in poll mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
+  -Server https://skyhawk.lan:8462 -EnrollToken your-long-shared-secret
+```
+
+The **Agents** tab (Manager view) shows the exact command with your token
+pre-filled. The agent enrols, then polls for work.
+
+**3. Queue a collection.** In a case, open **Agents**, pick a host and a
+collector, and hit **Collect → INC-…**. Results ingest straight into that case.
+
+| Collector | Collects (read-only) |
+|-----------|----------------------|
+| `triage` | processes + command lines, established network connections, recent logon events (4624/4625), autoruns (Run keys), non-system services |
+| `chainsaw` | runs a bundled `chainsaw.exe` over local event logs and uploads the detections (falls back to `triage` if Chainsaw isn't present) |
+
+**One-shot mode** (collect once into a case and exit — handy for a scheduled
+sweep):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 `
+  -Server http://skyhawk.lan:8462 -EnrollToken <token> -Once -Collector triage -CaseId INC-2043
+```
+
+**Guardrails, by design:** the server can only ask an agent to run one of the
+fixed collectors above — never an arbitrary command. The agent is read-only,
+authenticates with a per-host token, does nothing to hide itself, and its whole
+source is one readable PowerShell script. Tasking a collection requires the
+**Tech Lead** capability and is recorded in the case audit chain.
+
 ## Configuration
 
 | Env var | Default | Notes |
@@ -169,6 +230,7 @@ New users can self-register and pick a title.
 | `STORE` | `file` | `file` or `postgres` |
 | `DATABASE_URL` | - | required when `STORE=postgres` (needs `npm i pg`) |
 | `DEBUG` | - | set to `1` for verbose request logs |
+| `SKYHAWK_ENROLL_TOKEN` | *(random per boot)* | shared secret a collection agent presents to enrol |
 | `TLS_CERT` / `TLS_KEY` | - | paths to a cert + key; when both are set SKYHAWK serves **HTTPS** and the session cookie becomes `Secure` |
 
 ## Run it as a service (optional)
