@@ -608,11 +608,13 @@ async function loadAgents(){
   if(!agentEnrollShown&&hasCap('user.manage')){agentEnrollShown=true;try{const c=await (await fetch('/api/agents/config')).json();if(!c.error){
     const skyhost=(c.serverHosts&&c.serverHosts.length)?c.serverHosts[0]:location.hostname;
     const base=(c.tls?'https':'http')+'://'+skyhost+':'+c.port;const tok=esc(c.enrollToken);const ck=c.tls?'k':'';
+    const winPre=c.tls?'[Net.ServicePointManager]::ServerCertificateValidationCallback={$true}; ':'';
     const blk=function(id,cmd){return '<div class="cmdwrap"><button class="cmdcopy" onclick="copyText(this,'+Q+id+Q+')">copy</button><div class="cmd" id="'+id+'">'+cmd+'</div></div>';};
-    let h='<div class="card"><div class="k" style="margin-bottom:6px">Deploy the agent to the target host. Each one-liner pulls the agent straight from SKYHAWK ('+esc(base)+') and enrols it. Manager view.</div>';
-    h+='<div class="k" style="margin:8px 0 3px">Linux &mdash; download &amp; run on the target</div>'+blk('dlLin','curl -fsSL'+ck+' '+base+'/agent/skyhawk-agent.sh | bash -s -- --server '+base+' --enroll-token '+tok);
-    h+='<div class="k" style="margin:10px 0 3px">Windows &mdash; download &amp; run on the target</div>'+blk('dlWin','iwr '+base+'/agent/skyhawk-agent.ps1 -OutFile skyhawk-agent.ps1; powershell -ExecutionPolicy Bypass -File skyhawk-agent.ps1 -Server '+base+' -EnrollToken '+tok);
+    let h='<div class="card"><div class="k" style="margin-bottom:6px">Run one of these on the <b>target</b> host (not on SKYHAWK itself). Each downloads the agent from SKYHAWK ('+esc(base)+') and enrols it. Manager view.</div>';
+    h+='<div class="k" style="margin:8px 0 3px">Windows &mdash; PowerShell on the target</div>'+blk('dlWin',winPre+'$f=\"$env:TEMP/skyhawk-agent.ps1\"; iwr '+base+'/agent/skyhawk-agent.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -Server '+base+' -EnrollToken '+tok);
+    h+='<div class="k" style="margin:10px 0 3px">Linux &mdash; bash on the target</div>'+blk('dlLin','curl -fsSL'+ck+' '+base+'/agent/skyhawk-agent.sh | bash -s -- --server '+base+' --enroll-token '+tok);
     h+='<div class="k" style="margin:10px 0 3px">Push over SSH &mdash; from your box, set USER@TARGET</div>'+blk('sshCmd','curl -fsSL'+ck+' '+base+'/agent/skyhawk-agent.sh -o sky.sh &amp;&amp; scp sky.sh USER@TARGET:/tmp/ &amp;&amp; ssh USER@TARGET '+Q+'bash /tmp/sky.sh --server '+base+' --enroll-token '+tok+Q);
+    if(c.serverHosts&&c.serverHosts.length>1){h+='<div class="k" style="margin-top:8px">This server has several network addresses. If the target cannot reach '+esc(skyhost)+', swap it for one of: '+c.serverHosts.slice(1).map(esc).join(', ')+'.</div>';}
     h+='</div>';document.getElementById('agentEnroll').innerHTML=h;
   }}catch(e){}}
   let rows;try{rows=await (await fetch('/api/agents')).json();}catch(e){box.innerHTML='<div class="empty">Could not load agents.</div>';return;}
