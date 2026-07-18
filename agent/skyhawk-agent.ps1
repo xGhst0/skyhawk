@@ -141,16 +141,24 @@ function Run-Collector([string]$name){
 
 function Submit($state, $taskId, $caseId, $collector){
   $pack = Run-Collector $collector
-  $body = @{ id=$state.agentId; token=$state.agentToken; taskId=$taskId; invId=$caseId; collector=$collector; profile=$pack.profile; filename=$pack.filename; text=$pack.text } | ConvertTo-Json -Depth 8
-  try {
-    $r = Invoke-RestMethod -Method Post -Uri "$Server/api/agents/results" -ContentType "application/json" -Body $body
-  } catch {
-    $msg = $_.Exception.Message
-    try { $rs = $_.Exception.Response.GetResponseStream(); $msg = (New-Object System.IO.StreamReader($rs)).ReadToEnd() } catch {}
-    throw "server rejected results: $msg"
+  for($attempt=0; $attempt -lt 2; $attempt++){
+    $body = @{ id=$state.agentId; token=$state.agentToken; taskId=$taskId; invId=$caseId; collector=$collector; profile=$pack.profile; filename=$pack.filename; text=$pack.text } | ConvertTo-Json -Depth 8
+    try {
+      $r = Invoke-RestMethod -Method Post -Uri "$Server/api/agents/results" -ContentType "application/json" -Body $body
+      Write-Host "[SKYHAWK] $collector -> case $caseId : findings=$($r.findings) events=$($r.timeline) iocs=$($r.iocs)"
+      return $r
+    } catch {
+      $msg = $_.Exception.Message
+      try { $rs = $_.Exception.Response.GetResponseStream(); $msg = (New-Object System.IO.StreamReader($rs)).ReadToEnd() } catch {}
+      # a token that went stale (e.g. another process re-enrolled) — re-enrol once and retry
+      if($attempt -eq 0 -and $msg -match 'auth'){
+        Write-Warning "results auth failed - re-enrolling and retrying"
+        $ns = Enroll; $state.agentId = $ns.agentId; $state.agentToken = $ns.agentToken
+        continue
+      }
+      throw "server rejected results: $msg"
+    }
   }
-  Write-Host "[SKYHAWK] $collector -> case $caseId : findings=$($r.findings) events=$($r.timeline) iocs=$($r.iocs)"
-  return $r
 }
 
 # ---- main ----

@@ -238,13 +238,19 @@ async function agentAuth(id, token) { const a = await store.get("agents", id); i
 async function agentEnroll(b) {
   if (!ctEq(b.enrollToken, AGENT_ENROLL)) { const e = new Error("invalid enrollment token"); e.code = 403; throw e; }
   const host = (b.host || "unknown-host").toString().slice(0, 80);
-  const token = crypto.randomBytes(24).toString("hex");
   let a = (await store.all("agents")).find((x) => x.name.toLowerCase() === host.toLowerCase());
-  if (a) { a.token = token; a.os = (b.os || a.os || "").toString().slice(0, 160); a.lastSeen = Date.now(); }
-  else a = { id: mkId("AG"), name: host, os: (b.os || "").toString().slice(0, 160), token, enrolledAt: Date.now(), lastSeen: Date.now() };
+  if (a) {
+    // Keep the existing token so re-enrolments and multiple agent processes on
+    // the same host converge on one credential instead of rotating each other's
+    // into "auth failed". Rotate only if the record somehow has no token.
+    if (!a.token) a.token = crypto.randomBytes(24).toString("hex");
+    a.os = (b.os || a.os || "").toString().slice(0, 160); a.lastSeen = Date.now();
+  } else {
+    a = { id: mkId("AG"), name: host, os: (b.os || "").toString().slice(0, 160), token: crypto.randomBytes(24).toString("hex"), enrolledAt: Date.now(), lastSeen: Date.now() };
+  }
   await store.put("agents", a);
   log.info("agent.enrolled", { id: a.id, host });
-  return { agentId: a.id, agentToken: token, pollSeconds: 15, collectors: COLLECTORS };
+  return { agentId: a.id, agentToken: a.token, pollSeconds: 15, collectors: COLLECTORS };
 }
 async function agentPoll(id, token) {
   const a = await agentAuth(id, token); if (!a) { const e = new Error("agent auth failed"); e.code = 403; throw e; }

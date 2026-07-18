@@ -129,13 +129,18 @@ submit() { # taskId caseId collector
   # every collector maps to read-only triage on Linux (no Windows event logs to hunt)
   collect_triage
   local tid; if [ -n "${1:-}" ]; then tid="\"$1\""; else tid="null"; fi
-  local body; body="{\"id\":\"$AGENT_ID\",\"token\":\"$AGENT_TOKEN\",\"taskId\":$tid,\"invId\":\"$(json_escape "$2")\",\"collector\":\"$(json_escape "$3")\",\"profile\":\"agent\",\"filename\":\"$(json_escape "$(hostname).json")\",\"text\":\"$(json_escape "$DATA")\"}"
-  api POST /api/agents/results "$body" || { echo "[SKYHAWK] upload failed" >&2; return 1; }
-  case "$HTTP_CODE" in
-    2*) local f e i; f=$(jnum "$HTTP_BODY" findings); e=$(jnum "$HTTP_BODY" timeline); i=$(jnum "$HTTP_BODY" iocs)
-       echo "[SKYHAWK] $3 -> case $2 : findings=${f:-0} events=${e:-0} iocs=${i:-0}";;
-    *) echo "[SKYHAWK] server rejected results ($HTTP_CODE): $HTTP_BODY" >&2; return 1;;
-  esac
+  local attempt
+  for attempt in 1 2; do
+    local body; body="{\"id\":\"$AGENT_ID\",\"token\":\"$AGENT_TOKEN\",\"taskId\":$tid,\"invId\":\"$(json_escape "$2")\",\"collector\":\"$(json_escape "$3")\",\"profile\":\"agent\",\"filename\":\"$(json_escape "$(hostname).json")\",\"text\":\"$(json_escape "$DATA")\"}"
+    api POST /api/agents/results "$body" || { echo "[SKYHAWK] upload failed" >&2; return 1; }
+    case "$HTTP_CODE" in
+      2*) local f e i; f=$(jnum "$HTTP_BODY" findings); e=$(jnum "$HTTP_BODY" timeline); i=$(jnum "$HTTP_BODY" iocs)
+         echo "[SKYHAWK] $3 -> case $2 : findings=${f:-0} events=${e:-0} iocs=${i:-0}"; return 0;;
+      403) if [ "$attempt" = 1 ]; then echo "[SKYHAWK] results auth failed - re-enrolling and retrying" >&2; enroll || return 1; continue; fi
+         echo "[SKYHAWK] server rejected results ($HTTP_CODE): $HTTP_BODY" >&2; return 1;;
+      *) echo "[SKYHAWK] server rejected results ($HTTP_CODE): $HTTP_BODY" >&2; return 1;;
+    esac
+  done
 }
 
 poll_once() {
