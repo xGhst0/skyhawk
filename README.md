@@ -49,10 +49,13 @@ a drag-and-drop network map. Reconstruct the attack on an incident timeline.
 Track indicators that get auto-classified (IP, domain, URL, hash, CVE, and more)
 and pulled straight out of your finding text.
 
-**Ingest and collect.** Drop a **Chainsaw** Sigma-hunt export into the Ingest tab
-and it becomes findings, timeline events and IOCs, deduped against the case.
-Deploy the read-only **collection agent** to hosts on your network and pull live
-triage back into a case with one click — no third-party EDR required.
+**Ingest and collect.** Drop a **Chainsaw** Sigma-hunt export or a **Suricata**
+`eve.json` into the Ingest tab and it becomes findings, timeline events and IOCs,
+deduped against the case — Suricata alerts are grouped by signature, mapped to
+ATT&CK from the rule metadata, with the source/destination and any file hashes
+pulled out as IOCs. Deploy the read-only **collection agent** to hosts on your
+network and pull live triage back into a case with one click — no third-party EDR
+required.
 
 **Understand and respond.** Every technique in the **full MITRE ATT&CK Enterprise
 matrix** is searchable, with a keyword suggester so you do not need to memorise

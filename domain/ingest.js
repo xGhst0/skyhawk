@@ -276,8 +276,54 @@ const agent = {
   },
 };
 
+// ---------- Suricata IDS (eve.json) profile ----------
+// Network-layer detections to sit beside the host event-log ones. Consumes
+// Suricata's eve.json (NDJSON); alert records become findings, every alert
+// contributes a timeline entry and IOCs from its network + app-layer fields.
+const suricata = {
+  id: "suricata",
+  label: "Suricata IDS (eve.json)",
+  detect(text, filename, csv, json) {
+    if (json && json.some((d) => d && d.event_type && (d.alert || d.flow_id || d.src_ip))) return true;
+    return /eve\.json|suricata/i.test(filename || "");
+  },
+  normalize(text, filename, csv, json) {
+    const events = json || [];
+    const SEV = { 1: "high", 2: "medium", 3: "low", 4: "low" };
+    const timeline = [], iocs = [], seen = new Set(), g = {};
+    for (const e of events) {
+      if (!e || typeof e !== "object" || e.event_type !== "alert" || !e.alert) continue;
+      const a = e.alert, at = toIso(e.timestamp);
+      // IOCs from this alert's network + app-layer context (alert events only, to stay high-signal)
+      extractIocs([e.src_ip, e.dest_ip, e.dns && e.dns.rrname, e.http && e.http.hostname, e.tls && e.tls.sni,
+        e.fileinfo && [e.fileinfo.md5, e.fileinfo.sha1, e.fileinfo.sha256].filter(Boolean).join(" ")].filter(Boolean).join(" "), iocs, seen);
+      const sig = a.signature || "Suricata alert";
+      const sev = SEV[a.severity] || "medium";
+      const attack = [...new Set(((a.metadata && (a.metadata.mitre_technique_id || a.metadata.mitre_technique_ids)) || [])
+        .map((x) => String(x).toUpperCase()).filter((x) => /^T\d{4}(\.\d{3})?$/.test(x)))];
+      const flow = `${e.src_ip || "?"}:${e.src_port || ""} -> ${e.dest_ip || "?"}:${e.dest_port || ""} ${e.proto || ""}${e.app_proto ? "/" + e.app_proto : ""}`.trim();
+      timeline.push({ at: at || new Date().toISOString(), text: `${sig} — ${flow}`.slice(0, 500), source: "suricata" });
+      const it = g[sig] || (g[sig] = { sig, sev: "", attack: new Set(), hosts: new Set(), count: 0, cat: a.category || "", sample: "", first: null, last: null });
+      it.count++;
+      if ((LEVEL_RANK[sev] || 0) > (LEVEL_RANK[it.sev] || -1)) it.sev = sev;
+      attack.forEach((t) => it.attack.add(t));
+      [e.src_ip, e.dest_ip].forEach((ip) => { if (ip) it.hosts.add(ip); });
+      if (!it.sample) it.sample = flow;
+      if (at) { if (!it.first || at < it.first) it.first = at; if (!it.last || at > it.last) it.last = at; }
+    }
+    const findings = Object.values(g).map((x) => {
+      const hosts = [...x.hosts], when = x.first ? (x.first === x.last ? x.first : x.first + " -> " + x.last) : "";
+      return { title: x.sig.slice(0, 200), severity: x.sev || "medium", attack: [...x.attack],
+        assets: hosts.map((ip) => ({ type: PRIVATE_IP.test(ip) ? "server" : "external host", name: ip, ip })),
+        technicalDetail: `Suricata network alert${x.cat ? " (" + x.cat + ")" : ""}: ${x.count} hit${x.count > 1 ? "s" : ""}${when ? " (" + when + ")" : ""}.${x.sample ? "\nFlow: " + x.sample : ""}`, _n: x.count };
+    }).sort((a, b) => (LEVEL_RANK[b.severity] || 0) - (LEVEL_RANK[a.severity] || 0) || b._n - a._n)
+      .map((f) => { delete f._n; return f; });
+    return { timeline, iocs, findings };
+  },
+};
+
 // ---------- registry / public API ----------
-const PROFILES = [chainsaw, agent];
+const PROFILES = [chainsaw, suricata, agent];
 function profileList() { return PROFILES.map((p) => ({ id: p.id, label: p.label })); }
 
 function readAll(text, filename) {
