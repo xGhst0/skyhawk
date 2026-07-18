@@ -27,7 +27,7 @@ param(
   [Parameter(Mandatory=$true)][string]$EnrollToken,
   [string]$StateFile = "$env:ProgramData\SKYHAWK\agent.state.json",
   [switch]$Once,
-  [ValidateSet("triage","chainsaw")][string]$Collector = "triage",
+  [ValidateSet("triage","chainsaw","eventlog")][string]$Collector = "triage",
   [string]$CaseId,
   [string]$ChainsawPath,     # optional: path to chainsaw.exe for the 'chainsaw' collector
   [string]$ChainsawRules,    # optional: sigma rules dir
@@ -87,6 +87,31 @@ function Collect-Triage {
   }
 }
 
+# Read-only export of high-signal Windows event logs. No Chainsaw needed: the
+# events are shipped to SKYHAWK, which does the detection server-side. Reading
+# the Security log needs elevation (run as SYSTEM / admin) - other channels
+# degrade gracefully. Returns an array of {channel,id,time,computer,data}.
+function Collect-EventLog {
+  $events = New-Object System.Collections.ArrayList
+  $queries = @(
+    @{ LogName='Security'; Id=@(4624,4625,4688,4720,4728,4732,4756,4698,1102) },
+    @{ LogName='System'; Id=@(7045,104) },
+    @{ LogName='Microsoft-Windows-Sysmon/Operational'; Id=@(1,3,10) },
+    @{ LogName='Microsoft-Windows-PowerShell/Operational'; Id=@(4104) },
+    @{ LogName='Microsoft-Windows-Windows Defender/Operational'; Id=@(1116,1117,5001,5010) }
+  )
+  foreach($q in $queries){
+    try {
+      Get-WinEvent -FilterHashtable $q -MaxEvents $MaxEvents -ErrorAction SilentlyContinue | ForEach-Object {
+        $d = @{}
+        try { $x=[xml]$_.ToXml(); foreach($n in $x.Event.EventData.Data){ if($n.Name){ $d[$n.Name] = [string]$n.'#text' } } } catch {}
+        [void]$events.Add([pscustomobject]@{ channel=$_.LogName; id=$_.Id; time=$_.TimeCreated.ToString('o'); computer=$env:COMPUTERNAME; data=$d })
+      }
+    } catch {}
+  }
+  return ,$events.ToArray()
+}
+
 # Optional: run a bundled Chainsaw over local event logs and return its JSON.
 function Collect-Chainsaw {
   $exe = if($ChainsawPath){ $ChainsawPath } else { Join-Path $PSScriptRoot "chainsaw\chainsaw.exe" }
@@ -103,9 +128,15 @@ function Run-Collector([string]$name){
   if($name -eq "chainsaw"){
     $j = Collect-Chainsaw
     if($j){ return @{ text = $j; filename = "$env:COMPUTERNAME-chainsaw.json"; profile = "chainsaw" } }
+    # no chainsaw.exe present: export the event logs instead and let SKYHAWK hunt
   }
   $data = Collect-Triage
-  return @{ text = ($data | ConvertTo-Json -Depth 6); filename = "$env:COMPUTERNAME-triage.json"; profile = "agent" }
+  # 'eventlog' (and chainsaw-without-the-binary) also ships the raw event logs
+  if($name -eq "eventlog" -or $name -eq "chainsaw"){
+    $data | Add-Member -NotePropertyName events -NotePropertyValue (Collect-EventLog) -Force
+    $data.collector = $name
+  }
+  return @{ text = ($data | ConvertTo-Json -Depth 6 -Compress); filename = "$env:COMPUTERNAME-$name.json"; profile = "agent" }
 }
 
 function Submit($state, $taskId, $caseId, $collector){

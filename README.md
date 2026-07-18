@@ -217,17 +217,25 @@ channel. You deploy it to machines you administer with your own tooling.
 <details>
 <summary>Collectors and guardrails</summary>
 
-Both agents produce the same result shape. What each `triage` gathers, read-only:
+Every collector is read-only. Pick one per collection:
 
-| Platform | Gathers |
-|----------|---------|
-| Windows | processes and command lines, established network connections, logon events (4624/4625), Run-key autoruns, non-system services |
-| Linux | processes and command lines (`ps`), established connections (`ss`/`netstat`), recent logins with source IPs (`last`) |
+| Collector | Gathers |
+|-----------|---------|
+| `triage` | processes and command lines, established network connections, recent logons/logins. Windows adds Run-key autoruns and non-system services; Linux uses `ps` / `ss` / `last` |
+| `eventlog` | *(Windows)* exports the high-signal event logs (Security, System, Sysmon, PowerShell, Defender) and SKYHAWK turns them into ATT&CK-tagged findings server-side — **no Chainsaw needed on the endpoint** |
+| `chainsaw` | *(Windows)* runs a bundled `chainsaw.exe` over the local logs if present; if it isn't, it falls back to `eventlog` so you still get detections |
 
-The Windows `chainsaw` collector runs a bundled `chainsaw.exe` over the local
-event logs and uploads the detections (it falls back to `triage` if Chainsaw is
-not present). On Linux every collector maps to `triage`, since there are no
-Windows event logs to hunt.
+**Detection without agents on every box.** The `eventlog` collector is the point
+of that middle row: instead of installing Chainsaw (and keeping Sigma rules
+current) on every endpoint, the agent just reads the machine's own event logs and
+ships them back. SKYHAWK runs a small offline detection engine that maps the key
+Windows event IDs to ATT&CK techniques — log clearing (T1070.001), service and
+scheduled-task persistence (T1543 / T1053), account and group changes (T1136 /
+T1098), encoded PowerShell and suspicious command lines (T1059), LSASS access
+(T1003.001), disabled defenses (T1562.001), failed-logon bursts (T1110), and
+more. Reading the Security log needs the agent to run elevated (as SYSTEM or an
+admin); the other channels degrade gracefully. On Linux, `eventlog` and
+`chainsaw` map to `triage`, since there are no Windows event logs to read.
 
 The server can only ask an agent to run one of these fixed collectors. It cannot
 send arbitrary commands. The agent is read-only, authenticates with a per-host

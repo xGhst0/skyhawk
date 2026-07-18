@@ -21,7 +21,7 @@ const useTLS = !!(process.env.TLS_CERT && process.env.TLS_KEY);
 // Collection-agent enrollment secret. Operators SHOULD set SKYHAWK_ENROLL_TOKEN;
 // otherwise a random one is generated per boot and printed to the log.
 const AGENT_ENROLL = process.env.SKYHAWK_ENROLL_TOKEN || crypto.randomBytes(12).toString("hex");
-const COLLECTORS = ["triage", "chainsaw"];
+const COLLECTORS = ["triage", "eventlog", "chainsaw"];
 // Reachable (non-loopback) IPv4 addresses, so the Agents tab can hand out a
 // deploy one-liner that a *remote* target host can actually curl back to.
 function lanHosts() {

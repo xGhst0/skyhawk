@@ -622,7 +622,7 @@ async function loadAgents(){
   const canCollect=hasCap('tech.control');
   box.innerHTML=rows.map(function(a){
     const last=a.lastCollection?('last: '+a.lastCollection.collector+' → '+esc(a.lastCollection.invId)+' ('+a.lastCollection.result.findings+'f/'+a.lastCollection.result.timeline+'e/'+a.lastCollection.result.iocs+'i) '+ago(a.lastCollection.at)):'no collections yet';
-    const ctrl=canCollect?'<select id="col-'+a.id+'" style="width:110px"><option value="triage">triage</option><option value="chainsaw">chainsaw</option></select><button onclick="doCollect('+Q+a.id+Q+')">Collect → '+esc(INV)+'</button>'+(hasCap('user.manage')?'<button class="ghost" onclick="dropAgent('+Q+a.id+Q+')">remove</button>':''):'';
+    const ctrl=canCollect?'<select id="col-'+a.id+'" style="width:128px" title="triage: processes/connections/logons · eventlog: Windows event-log detections (no Chainsaw needed) · chainsaw: bundled Chainsaw"><option value="triage">triage</option><option value="eventlog">event logs</option><option value="chainsaw">chainsaw</option></select><button onclick="doCollect('+Q+a.id+Q+')">Collect → '+esc(INV)+'</button>'+(hasCap('user.manage')?'<button class="ghost" onclick="dropAgent('+Q+a.id+Q+')">remove</button>':''):'';
     return '<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><span class="dot" style="background:'+(a.online?'var(--green)':'var(--mut)')+'"></span><b>'+esc(a.name)+'</b> <span class="k">'+esc(a.os||'')+'</span><div class="k" style="margin-top:3px">'+(a.online?'online':'seen '+ago(a.lastSeen))+(a.pending?' · '+a.pending+' pending':'')+' · '+last+'</div></div><div class="row" style="gap:6px">'+ctrl+'</div></div></div>';
   }).join('');
 }

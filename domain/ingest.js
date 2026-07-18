@@ -171,6 +171,73 @@ function hitsToItems(hits) {
   return { timeline, iocs, findings };
 }
 
+// ---------- offline Windows event detection (a Chainsaw-free mini-engine) ----------
+// Maps high-signal Windows event IDs to ATT&CK-tagged findings, so a host can
+// just export its event logs (no Chainsaw install) and SKYHAWK does the hunting.
+const EV_SUSP_CMD = /-enc\b|-encodedcommand|frombase64string|downloadstring|\biex\b|invoke-expression|\-nop\b|-w(indowstyle)?\s+hidden|-noni|certutil\b[^\n]*(-urlcache|-decode)|bitsadmin|\bmshta\b|regsvr32\b[^\n]*http|rundll32\b[^\n]*(javascript|http)|\bnc\.exe\b|Invoke-WebRequest[^\n]*-outfile/i;
+const EV_SUSP_PATH = /\\(temp|appdata|programdata|windows\\temp|users\\public|\$recycle)\\/i;
+const evd = (d, ...names) => { const keys = Object.keys(d || {}); for (const n of names) { const k = keys.find((k) => k.toLowerCase() === n.toLowerCase()); if (k != null && d[k] !== "" && d[k] != null) return String(d[k]); } return ""; };
+const extIp = (ip) => ip && ip !== "-" && !PRIVATE_IP.test(ip) && ip !== "::1" && ip !== "::";
+
+function processWinEvents(events, host) {
+  const timeline = [], iocs = [], seen = new Set(), g = {};
+  const add = (key, title, sev, attack, comp, at, sample) => {
+    const it = g[key] || (g[key] = { title, sev: "", attack: new Set(), hosts: new Set(), count: 0, sample: "", first: null, last: null });
+    it.count++; if (comp) it.hosts.add(comp);
+    (attack || []).forEach((a) => it.attack.add(a));
+    if (sev && (LEVEL_RANK[sev] || 0) > (LEVEL_RANK[it.sev] || -1)) it.sev = sev;
+    if (!it.sample && sample) it.sample = String(sample).slice(0, 220);
+    if (at) { if (!it.first || at < it.first) it.first = at; if (!it.last || at > it.last) it.last = at; }
+  };
+  let failed = 0, fUsers = new Set(), fIps = new Set(), fLast = null, fHost = host;
+  for (const ev of (events || [])) {
+    const ch = String(ev.channel || ""), id = Number(ev.id) || 0, d = ev.data || {}, at = toIso(ev.time), comp = ev.computer || host;
+    extractIocs(Object.keys(d).map((k) => d[k]).join(" "), iocs, seen);
+    const sysmon = /sysmon/i.test(ch), ps = /powershell/i.test(ch), defender = /defender/i.test(ch), sec = /security/i.test(ch), sys = /system/i.test(ch);
+    if (sec && id === 4624) {
+      const lt = evd(d, "LogonType"), u = evd(d, "TargetUserName"), ip = evd(d, "IpAddress");
+      if (extIp(ip)) timeline.push({ at, text: `Logon type ${lt} ${u} from ${ip} on ${comp}`.slice(0, 500), source: "eventlog:" + comp });
+      if (lt === "10" && extIp(ip)) add("rdp-ext", "External RDP logon", "high", ["T1021.001"], comp, at, `${u} from ${ip}`);
+    } else if (sec && id === 4625) {
+      failed++; const u = evd(d, "TargetUserName"), ip = evd(d, "IpAddress");
+      if (u) fUsers.add(u); if (ip && ip !== "-") fIps.add(ip); if (at && (!fLast || at > fLast)) fLast = at; fHost = comp;
+    } else if (sec && id === 4688) {
+      const img = evd(d, "NewProcessName", "ProcessName"), cmd = evd(d, "CommandLine");
+      if (cmd && EV_SUSP_CMD.test(cmd)) add("susp-cmd", "Suspicious process command line", "high", ["T1059"], comp, at, cmd);
+      else if (img && EV_SUSP_PATH.test(img)) add("susp-path", "Process run from a suspicious path", "medium", ["T1204"], comp, at, img);
+    } else if (sec && id === 4720) add("acct-new", "Account created", "medium", ["T1136.001"], comp, at, evd(d, "TargetUserName"));
+    else if (sec && (id === 4728 || id === 4732 || id === 4756)) add("group-add", "Member added to a privileged group", "high", ["T1098"], comp, at, evd(d, "MemberName", "TargetUserName"));
+    else if (sec && id === 4698) add("sched-task", "Scheduled task created", "medium", ["T1053.005"], comp, at, evd(d, "TaskName"));
+    else if ((sec && id === 1102) || (sys && id === 104)) add("log-clear", "Event log cleared", "high", ["T1070.001"], comp, at, evd(d, "SubjectUserName"));
+    else if (sys && id === 7045) {
+      const svc = evd(d, "ServiceName"), pth = evd(d, "ImagePath");
+      add("svc-install", "Service installed", (pth && EV_SUSP_PATH.test(pth)) ? "high" : "medium", ["T1543.003"], comp, at, `${svc} -> ${pth}`);
+    } else if (ps && id === 4104) {
+      const sb = evd(d, "ScriptBlockText");
+      if (sb && EV_SUSP_CMD.test(sb)) add("susp-ps", "Suspicious PowerShell script block", "high", ["T1059.001"], comp, at, sb);
+    } else if (sysmon && id === 1) {
+      const cmd = evd(d, "CommandLine"), img = evd(d, "Image"), hashes = evd(d, "Hashes");
+      if (hashes) extractIocs(hashes, iocs, seen);
+      if (cmd && EV_SUSP_CMD.test(cmd)) add("susp-cmd", "Suspicious process command line", "high", ["T1059"], comp, at, cmd);
+      else if (img && EV_SUSP_PATH.test(img)) add("susp-path", "Process run from a suspicious path", "medium", ["T1204"], comp, at, img);
+    } else if (sysmon && id === 3) {
+      const dip = evd(d, "DestinationIp"), dport = evd(d, "DestinationPort");
+      if (extIp(dip)) { extractIocs(dip, iocs, seen); timeline.push({ at, text: `Outbound connection to ${dip}:${dport} from ${comp}`.slice(0, 500), source: "eventlog:" + comp }); }
+    } else if (sysmon && id === 10) {
+      if (/lsass\.exe/i.test(evd(d, "TargetImage"))) add("lsass", "LSASS access (possible credential dumping)", "critical", ["T1003.001"], comp, at, evd(d, "SourceImage"));
+    } else if (defender && (id === 1116 || id === 1117)) add("av-detect", "Endpoint AV detection", "high", ["T1204"], comp, at, evd(d, "Threat Name", "ThreatName", "Threat_Name"));
+    else if (defender && (id === 5001 || id === 5010 || id === 5012)) add("av-off", "Endpoint protection disabled", "high", ["T1562.001"], comp, at, "");
+  }
+  if (failed >= 8) add("brute", "Failed-logon burst (possible brute force / password spraying)", "medium", ["T1110"], fHost, fLast, `${failed} failures, ${fUsers.size} users, ${fIps.size} source IPs`);
+  fIps.forEach((ip) => { if (ip && ip !== "-") extractIocs(ip, iocs, seen); });
+  const findings = Object.values(g).map((x) => {
+    const hosts = [...x.hosts], when = x.first ? (x.first === x.last ? x.first : x.first + " -> " + x.last) : "";
+    return { title: x.title, severity: x.sev || "medium", attack: [...x.attack], assets: hosts.map(hostAsset),
+      technicalDetail: `Detected from Windows event logs${hosts.length ? " on " + hosts.join(", ") : ""}${x.count > 1 ? ` (${x.count} events${when ? ", " + when : ""})` : (when ? ` (${when})` : "")}.${x.sample ? "\nSample: " + x.sample : ""}` };
+  });
+  return { timeline, iocs, findings };
+}
+
 // ---------- SKYHAWK collection-agent profile (read-only host triage) ----------
 const agent = {
   id: "agent",
@@ -197,7 +264,15 @@ const agent = {
     });
     // process command lines -> IOC scan
     arr(doc.processes).forEach((p) => { extractIocs([p.cmdline, p.path].join(" "), iocs, seen); });
-    return { timeline, iocs, findings: [] };
+    // exported Windows event logs -> offline detections (Chainsaw-free)
+    const findings = [];
+    if (doc.events && doc.events.length) {
+      const w = processWinEvents(arr(doc.events), host);
+      w.timeline.forEach((t) => timeline.push(t));
+      w.iocs.forEach((x) => { const k = x.type + ":" + x.value.toLowerCase(); if (!seen.has(k)) { seen.add(k); iocs.push(x); } });
+      w.findings.forEach((f) => findings.push(f));
+    }
+    return { timeline, iocs, findings };
   },
 };
 
