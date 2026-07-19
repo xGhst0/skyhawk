@@ -15,6 +15,7 @@ const pages = require("./pages.js");
 const attack = require("./attack.js");
 const remediation = require("./domain/remediation.js");
 const ingest = require("./domain/ingest.js");
+const lake = require("./domain/lake.js");
 
 const PORT = process.env.PORT || 8462;
 const useTLS = !!(process.env.TLS_CERT && process.env.TLS_KEY);
@@ -219,14 +220,33 @@ async function writeIngested(invId, actorId, actorName, sel, src) {
   }
   return res;
 }
+// Store raw events in the lake and extract the network map (hosts = nodes,
+// observed src->dest flows = connectors), merging into the investigation's map.
+async function ingestEvents(invId, events, source) {
+  if (!events || !events.length) return { events: 0, mapNodes: 0, mapEdges: 0 };
+  const stamped = events.map((e) => ({ ...e, source: e.source || source }));
+  const lakeN = lake.append(invId, stamped);
+  const inv = await getInv(invId);
+  const before = inv.map && typeof inv.map === "object" ? inv.map : { nodes: [], edges: [] };
+  const nBefore = (before.nodes || []).length, eBefore = (before.edges || []).length;
+  const merged = ingest.mapFromEvents(events.filter((e) => e.saddr && e.daddr), before);
+  const addedN = merged.nodes.length - nBefore, addedE = merged.edges.length - eBefore;
+  if (addedN || addedE) { inv.map = merged; await store.put("investigations", inv); }
+  return { events: lakeN, mapNodes: addedN, mapEdges: addedE };
+}
 async function ingestCommit(invId, b) {
   const actor = requireCap(b.actorId, "finding.create");
   await getInv(invId);
   const src = (b.source || "ingest").toString().slice(0, 40);
   const res = await writeIngested(invId, actor.id, actor.name, b, src);
-  await auditRecord(invId, actor.id, "case.ingested", invId, { source: src, ...res });
-  log.info("case.ingested", { inv: invId, source: src, ...res });
-  return res;
+  let lakeRes = { events: 0, mapNodes: 0, mapEdges: 0 };
+  if (b.text) {
+    const parsed = ingest.parse(b.text, b.filename || "", b.profile);
+    if (!parsed.error && parsed.events && parsed.events.length) lakeRes = await ingestEvents(invId, parsed.events, parsed.profile);
+  }
+  await auditRecord(invId, actor.id, "case.ingested", invId, { source: src, ...res, ...lakeRes });
+  log.info("case.ingested", { inv: invId, source: src, ...res, ...lakeRes });
+  return { ...res, ...lakeRes };
 }
 
 // ---------- collection agents (read-only host triage; authorised IR use) ----------
@@ -271,6 +291,7 @@ async function agentResults(b) {
   const authorId = (task && task.createdBy) || ("agent:" + a.id);
   const authorName = (task && task.createdByName) || a.name;
   if (!parsed.error) committed = await writeIngested(invId, authorId, authorName, parsed, "agent:" + a.name);
+  if (!parsed.error && parsed.events && parsed.events.length) { const le = await ingestEvents(invId, parsed.events, parsed.profile); committed = { ...committed, ...le }; }
   if (task) { task.status = "done"; task.completedAt = Date.now(); task.result = committed; task.profile = parsed.profile || null; await store.put("agentTasks", task); }
   a.lastSeen = Date.now();
   a.lastCollection = { at: Date.now(), collector: (task && task.collector) || b.collector || "adhoc", invId, result: committed };
@@ -748,6 +769,7 @@ const handler = async (req, res) => {
       return send(res, 200, ingest.dedupe(parsed, existing));
     }
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/ingest\/commit$/)) && req.method === "POST") return send(res, 201, await ingestCommit(m[1], await rb()));
+    if ((m = p.match(/^\/api\/investigations\/([^/]+)\/lake$/))) { requireCap(actor.id, "finding.create"); await getInv(m[1]); return send(res, 200, lake.query(m[1], { q: q.get("q") || "", source: q.get("source") || "", from: q.get("from") || "", to: q.get("to") || "", limit: Number(q.get("limit") || 100), offset: Number(q.get("offset") || 0) })); }
     if ((m = p.match(/^\/api\/investigations\/([^/]+)\/map$/)) && req.method === "POST") { requireCap(actor.id, "finding.create"); const b = await rb(); const inv = await getInv(m[1]); inv.map = { nodes: Array.isArray(b.nodes) ? b.nodes : [], edges: Array.isArray(b.edges) ? b.edges : [] }; await store.put("investigations", inv); log.info("map.saved", { inv: m[1], nodes: inv.map.nodes.length }); return send(res, 200, inv.map); }
     if (p === "/api/attack") return send(res, 200, { tactics: attack.tactics, techniques: attack.techniques });
     if (p === "/api/attack/suggest" && req.method === "POST") { const b = await rb(); return send(res, 200, attack.suggest(b.text || "")); }

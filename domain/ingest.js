@@ -76,6 +76,41 @@ const ci = (obj, ...names) => { // case-insensitive field getter, first match wi
 };
 const toIso = (v) => { if (!v) return null; const d = new Date(String(v).replace(" ", "T")); return isNaN(d) ? null : d.toISOString(); };
 const hostAsset = (name) => ({ type: /dc\d|domain/i.test(name) ? "domain controller" : /srv|server/i.test(name) ? "server" : "workstation", name: String(name).slice(0, 80), ip: "" });
+// a normalized event for the lake / SIEM tab
+const mkEvent = (source, type, o) => ({ ts: o.ts || null, source, type: type || "", host: o.host || o.saddr || "", saddr: o.saddr || "", sport: o.sport != null ? String(o.sport) : "", daddr: o.daddr || "", dport: o.dport != null ? String(o.dport) : "", proto: (o.proto || "").toString().toLowerCase(), msg: (o.msg || "").toString().slice(0, 300), attack: o.attack || [], fields: o.fields || {}, raw: o.raw != null ? o.raw : null });
+
+// ---------- network map extraction (hosts = nodes, flows = connectors) ----------
+const ZONE_X = { external: 110, dmz: 345, internal: 585 };
+function mapFromEvents(events, existing, opts) {
+  opts = opts || {}; const capNodes = opts.capNodes || 48, capEdges = opts.capEdges || 90;
+  const base = existing && typeof existing === "object" ? existing : {};
+  const nodes = Array.isArray(base.nodes) ? base.nodes.slice() : [];
+  const edges = Array.isArray(base.edges) ? base.edges.slice() : [];
+  const byIp = {}; nodes.forEach((n) => { const k = (n.ip || n.name || "").toLowerCase(); if (k) byIp[k] = n; });
+  const yz = {}; let seq = 0;
+  const ensure = (ip) => {
+    if (!ip || ip === "-") return null; const k = ip.toLowerCase();
+    if (byIp[k]) return byIp[k];
+    if (nodes.length >= capNodes) return null;
+    const pub = !PRIVATE_IP.test(ip), zone = pub ? "external" : "internal";
+    const n = { id: "ni" + (Date.now().toString(36)) + (seq++).toString(36), type: pub ? "external host" : "server", name: ip, ip, state: pub ? "external" : "clean", x: ZONE_X[zone], y: 50 + ((yz[zone] = (yz[zone] || 0) + 1) - 1) * 66 };
+    nodes.push(n); byIp[k] = n; return n;
+  };
+  const eseen = new Set(edges.map((e) => e.a + "|" + e.b));
+  // alert/attack-bearing flows first so the most useful connectors survive the cap
+  const ordered = events.slice().sort((a, b) => ((b.attack && b.attack.length) ? 1 : 0) - ((a.attack && a.attack.length) ? 1 : 0));
+  for (const ev of ordered) {
+    if (!ev.saddr || !ev.daddr) continue;
+    const a = ensure(ev.saddr), b = ensure(ev.daddr);
+    if (!a || !b || a === b) continue;
+    if (eseen.has(a.id + "|" + b.id) || eseen.has(b.id + "|" + a.id)) continue;
+    if (edges.length >= capEdges) break;
+    eseen.add(a.id + "|" + b.id);
+    const label = (ev.attack && ev.attack.length) ? ev.attack[0] : (ev.proto ? ev.proto + (ev.dport ? "/" + ev.dport : "") : "");
+    edges.push({ a: a.id, b: b.id, label: String(label).slice(0, 24) });
+  }
+  return { nodes, edges };
+}
 
 // ---------- Chainsaw profile ----------
 const chainsaw = {
@@ -262,17 +297,30 @@ const agent = {
     arr(doc.connections).forEach((c) => {
       if (c.remoteAddr) extractIocs(c.remoteAddr, iocs, seen);
     });
-    // process command lines -> IOC scan
-    arr(doc.processes).forEach((p) => { extractIocs([p.cmdline, p.path].join(" "), iocs, seen); });
-    // exported Windows event logs -> offline detections (Chainsaw-free)
+    // host connections -> lake events (so they show in the SIEM tab + network map)
+    const events = [];
+    arr(doc.connections).forEach((c) => {
+      if (!c.remoteAddr) return;
+      events.push(mkEvent("agent", "netconn", { ts: doc.collectedAt, host, saddr: "", daddr: c.remoteAddr, dport: c.remotePort, proto: c.proto || "tcp",
+        msg: `${host} -> ${c.remoteAddr}:${c.remotePort || ""} (${c.process || c.pid || ""})`, raw: c }));
+    });
+    // exported Windows event logs -> offline detections (Chainsaw-free) + lake events
     const findings = [];
     if (doc.events && doc.events.length) {
-      const w = processWinEvents(arr(doc.events), host);
+      const evs = arr(doc.events);
+      const w = processWinEvents(evs, host);
       w.timeline.forEach((t) => timeline.push(t));
       w.iocs.forEach((x) => { const k = x.type + ":" + x.value.toLowerCase(); if (!seen.has(k)) { seen.add(k); iocs.push(x); } });
       w.findings.forEach((f) => findings.push(f));
+      evs.forEach((ev) => {
+        const d = ev.data || {};
+        events.push(mkEvent("eventlog", String(ev.channel || "").replace(/^.*[\\/]/, "") + "/" + ev.id, { ts: ev.time, host: ev.computer || host,
+          saddr: d.IpAddress || d.SourceIp || "", daddr: d.DestinationIp || "", dport: d.DestinationPort || "",
+          msg: [ev.channel && String(ev.channel).replace(/^.*[\\/]/, ""), "EID " + ev.id, d.TargetUserName || d.SubjectUserName || "", d.CommandLine || d.ScriptBlockText || d.ServiceName || ""].filter(Boolean).join(" · ").slice(0, 300),
+          fields: d, raw: ev }));
+      });
     }
-    return { timeline, iocs, findings };
+    return { timeline, iocs, findings, events };
   },
 };
 
@@ -288,28 +336,37 @@ const suricata = {
     return /eve\.json|suricata/i.test(filename || "");
   },
   normalize(text, filename, csv, json) {
-    const events = json || [];
+    const rows = json || [];
     const SEV = { 1: "high", 2: "medium", 3: "low", 4: "low" };
-    const timeline = [], iocs = [], seen = new Set(), g = {};
-    for (const e of events) {
-      if (!e || typeof e !== "object" || e.event_type !== "alert" || !e.alert) continue;
-      const a = e.alert, at = toIso(e.timestamp);
-      // IOCs from this alert's network + app-layer context (alert events only, to stay high-signal)
-      extractIocs([e.src_ip, e.dest_ip, e.dns && e.dns.rrname, e.http && e.http.hostname, e.tls && e.tls.sni,
-        e.fileinfo && [e.fileinfo.md5, e.fileinfo.sha1, e.fileinfo.sha256].filter(Boolean).join(" ")].filter(Boolean).join(" "), iocs, seen);
-      const sig = a.signature || "Suricata alert";
-      const sev = SEV[a.severity] || "medium";
-      const attack = [...new Set(((a.metadata && (a.metadata.mitre_technique_id || a.metadata.mitre_technique_ids)) || [])
-        .map((x) => String(x).toUpperCase()).filter((x) => /^T\d{4}(\.\d{3})?$/.test(x)))];
-      const flow = `${e.src_ip || "?"}:${e.src_port || ""} -> ${e.dest_ip || "?"}:${e.dest_port || ""} ${e.proto || ""}${e.app_proto ? "/" + e.app_proto : ""}`.trim();
-      timeline.push({ at: at || new Date().toISOString(), text: `${sig} — ${flow}`.slice(0, 500), source: "suricata" });
-      const it = g[sig] || (g[sig] = { sig, sev: "", attack: new Set(), hosts: new Set(), count: 0, cat: a.category || "", sample: "", first: null, last: null });
-      it.count++;
-      if ((LEVEL_RANK[sev] || 0) > (LEVEL_RANK[it.sev] || -1)) it.sev = sev;
-      attack.forEach((t) => it.attack.add(t));
-      [e.src_ip, e.dest_ip].forEach((ip) => { if (ip) it.hosts.add(ip); });
-      if (!it.sample) it.sample = flow;
-      if (at) { if (!it.first || at < it.first) it.first = at; if (!it.last || at > it.last) it.last = at; }
+    const timeline = [], iocs = [], seen = new Set(), g = {}, events = [];
+    for (const e of rows) {
+      if (!e || typeof e !== "object" || !e.event_type) continue;
+      const at = toIso(e.timestamp);
+      const et = e.event_type;
+      let msg = et, attack = [];
+      if (et === "alert" && e.alert) {
+        const a = e.alert;
+        msg = a.signature || "alert";
+        attack = [...new Set(((a.metadata && (a.metadata.mitre_technique_id || a.metadata.mitre_technique_ids)) || []).map((x) => String(x).toUpperCase()).filter((x) => /^T\d{4}(\.\d{3})?$/.test(x)))];
+        const sev = SEV[a.severity] || "medium";
+        extractIocs([e.src_ip, e.dest_ip, e.dns && e.dns.rrname, e.http && e.http.hostname, e.tls && e.tls.sni,
+          e.fileinfo && [e.fileinfo.md5, e.fileinfo.sha1, e.fileinfo.sha256].filter(Boolean).join(" ")].filter(Boolean).join(" "), iocs, seen);
+        const flow = `${e.src_ip || "?"}:${e.src_port || ""} -> ${e.dest_ip || "?"}:${e.dest_port || ""} ${e.proto || ""}${e.app_proto ? "/" + e.app_proto : ""}`.trim();
+        timeline.push({ at: at || new Date().toISOString(), text: `${msg} — ${flow}`.slice(0, 500), source: "suricata" });
+        const it = g[msg] || (g[msg] = { sig: msg, sev: "", attack: new Set(), hosts: new Set(), count: 0, cat: a.category || "", sample: flow, first: null, last: null });
+        it.count++;
+        if ((LEVEL_RANK[sev] || 0) > (LEVEL_RANK[it.sev] || -1)) it.sev = sev;
+        attack.forEach((t) => it.attack.add(t));
+        [e.src_ip, e.dest_ip].forEach((ip) => { if (ip) it.hosts.add(ip); });
+        if (at) { if (!it.first || at < it.first) it.first = at; if (!it.last || at > it.last) it.last = at; }
+      } else if (et === "dns" && e.dns) { msg = `DNS ${e.dns.rrtype || ""} ${e.dns.rrname || ""}`.trim(); }
+      else if (et === "http" && e.http) { msg = `HTTP ${e.http.http_method || ""} ${e.http.hostname || ""}${e.http.url || ""}`.trim(); }
+      else if (et === "tls" && e.tls) { msg = `TLS ${e.tls.sni || e.tls.subject || ""}`.trim(); }
+      else if (et === "fileinfo" && e.fileinfo) { msg = `file ${e.fileinfo.filename || ""}`.trim(); }
+      else if (et === "flow") { msg = `flow ${e.proto || ""}`.trim(); }
+      // every eve record (alert or not) lands in the lake
+      events.push(mkEvent("suricata", et, { ts: at, saddr: e.src_ip, sport: e.src_port, daddr: e.dest_ip, dport: e.dest_port, proto: e.proto, msg, attack, raw: e,
+        fields: { app_proto: e.app_proto, sni: e.tls && e.tls.sni, host: e.http && e.http.hostname, dns: e.dns && e.dns.rrname } }));
     }
     const findings = Object.values(g).map((x) => {
       const hosts = [...x.hosts], when = x.first ? (x.first === x.last ? x.first : x.first + " -> " + x.last) : "";
@@ -318,13 +375,117 @@ const suricata = {
         technicalDetail: `Suricata network alert${x.cat ? " (" + x.cat + ")" : ""}: ${x.count} hit${x.count > 1 ? "s" : ""}${when ? " (" + when + ")" : ""}.${x.sample ? "\nFlow: " + x.sample : ""}`, _n: x.count };
     }).sort((a, b) => (LEVEL_RANK[b.severity] || 0) - (LEVEL_RANK[a.severity] || 0) || b._n - a._n)
       .map((f) => { delete f._n; return f; });
-    return { timeline, iocs, findings };
+    return { timeline, iocs, findings, events };
+  },
+};
+
+// ---------- Zeek profile (TSV logs with a #fields header, or JSON lines) ----------
+const zeek = {
+  id: "zeek",
+  label: "Zeek network logs",
+  detect(text, filename, csv, json) {
+    if (/#fields|#separator|#path\b/.test(text || "")) return true;
+    if (json && json.some((d) => d && (d["id.orig_h"] || d._path || (d.id && d.id.orig_h)))) return true;
+    return /\bzeek\b|conn\.log|dns\.log|http\.log|ssl\.log|notice\.log/i.test(filename || "");
+  },
+  normalize(text, filename, csv, json) {
+    const recs = [];
+    let path = (filename || "").replace(/^.*[\\/]/, "").replace(/\.log(\.gz)?$/i, "") || "zeek";
+    if (/#fields/.test(text || "")) {
+      // Zeek TSV: header lines start with '#', data rows are tab-separated
+      let fields = null; const lines = (text || "").split(/\r?\n/);
+      for (const line of lines) {
+        if (!line) continue;
+        if (line[0] === "#") { const m = /^#fields\t(.+)$/.exec(line); if (m) fields = m[1].split("\t"); const p = /^#path\t(.+)$/.exec(line); if (p) path = p[1].trim(); continue; }
+        if (!fields) continue;
+        const cols = line.split("\t"); const o = {}; fields.forEach((f, i) => { o[f] = cols[i]; });
+        recs.push(o);
+      }
+    } else if (json && json.length) {
+      json.forEach((d) => { if (d && typeof d === "object") { if (d._path) path = d._path; recs.push(d); } });
+    }
+    const G = (o, k) => { const v = o[k] != null ? o[k] : (o.id && o.id[k.replace("id.", "")]); return v == null || v === "-" ? "" : String(v); };
+    const timeline = [], iocs = [], seen = new Set(), events = [], notices = {};
+    for (const o of recs) {
+      const at = o.ts ? toIso(new Date(Number(o.ts) * 1000).toISOString()) || toIso(o.ts) : null;
+      const saddr = G(o, "id.orig_h"), daddr = G(o, "id.resp_h"), sport = G(o, "id.orig_p"), dport = G(o, "id.resp_p");
+      const proto = G(o, "proto");
+      let msg = path, attack = [];
+      if (path === "dns") { msg = `DNS ${G(o, "qtype_name") || ""} ${G(o, "query")}`.trim(); extractIocs(G(o, "query"), iocs, seen); }
+      else if (path === "http") { msg = `HTTP ${G(o, "method")} ${G(o, "host")}${G(o, "uri")}`.trim(); extractIocs(G(o, "host") + " " + G(o, "uri"), iocs, seen); }
+      else if (path === "ssl") { msg = `TLS ${G(o, "server_name")}`.trim(); extractIocs(G(o, "server_name"), iocs, seen); }
+      else if (path === "conn") { msg = `conn ${proto} ${saddr}:${sport} -> ${daddr}:${dport} (${G(o, "service") || "?"})`.trim(); }
+      else if (path === "files") { const h = G(o, "sha256") || G(o, "md5"); if (h) extractIocs(h, iocs, seen); msg = `file ${G(o, "mime_type") || ""}`.trim(); }
+      else if (path === "notice") {
+        const note = G(o, "note") || "Zeek notice", smsg = G(o, "msg"); msg = `NOTICE ${note}: ${smsg}`.trim();
+        const it = notices[note] || (notices[note] = { note, hosts: new Set(), count: 0, sample: smsg || "", first: null, last: null });
+        it.count++; if (saddr) it.hosts.add(saddr); if (daddr) it.hosts.add(daddr);
+        if (at) { if (!it.first || at < it.first) it.first = at; if (!it.last || at > it.last) it.last = at; }
+        timeline.push({ at: at || new Date().toISOString(), text: msg.slice(0, 500), source: "zeek" });
+      }
+      if (daddr) extractIocs(daddr, iocs, seen);
+      events.push(mkEvent("zeek", path, { ts: at, saddr, sport, daddr, dport, proto, msg, attack, raw: o,
+        fields: { uid: o.uid, service: G(o, "service"), query: G(o, "query"), host: G(o, "host"), server_name: G(o, "server_name") } }));
+    }
+    const findings = Object.values(notices).map((x) => {
+      const hosts = [...x.hosts], when = x.first ? (x.first === x.last ? x.first : x.first + " -> " + x.last) : "";
+      return { title: ("Zeek notice: " + x.note).slice(0, 200), severity: "medium", attack: [],
+        assets: hosts.map((ip) => ({ type: PRIVATE_IP.test(ip) ? "server" : "external host", name: ip, ip })),
+        technicalDetail: `Zeek raised ${x.count} "${x.note}" notice${x.count > 1 ? "s" : ""}${when ? " (" + when + ")" : ""}.${x.sample ? "\n" + x.sample : ""}` };
+    });
+    return { timeline, iocs, findings, events };
+  },
+};
+
+// ---------- PCAP profile (classic libpcap -> flow events, pure Node) ----------
+const pcap = {
+  id: "pcap",
+  label: "PCAP capture (flows)",
+  detect(text, filename) { return /\.pcap$|\.pcapng$|\.cap$/i.test(filename || ""); },
+  normalize(text, filename) {
+    let buf; try { buf = Buffer.from(text, "base64"); } catch { return { error: "could not read PCAP bytes", timeline: [], iocs: [], findings: [], events: [] }; }
+    if (buf.length < 24) return { error: "not a PCAP file", timeline: [], iocs: [], findings: [], events: [] };
+    // endianness + timestamp precision from the magic
+    let le, nano; const m = buf.readUInt32LE(0);
+    if (m === 0xa1b2c3d4) { le = true; nano = false; } else if (m === 0xa1b23c4d) { le = true; nano = true; }
+    else if (m === 0xd4c3b2a1) { le = false; nano = false; } else if (m === 0x4d3cb2a1) { le = false; nano = true; }
+    else return { error: "unsupported capture (pcapng isn't parsed yet — export as classic pcap)", timeline: [], iocs: [], findings: [], events: [] };
+    const u32 = (off) => le ? buf.readUInt32LE(off) : buf.readUInt32BE(off);
+    const u16 = (off) => le ? buf.readUInt16LE(off) : buf.readUInt16BE(off);
+    const linktype = u32(20);
+    const ip4 = (o) => `${buf[o]}.${buf[o + 1]}.${buf[o + 2]}.${buf[o + 3]}`;
+    const flows = {}; const seen = new Set(), iocs = []; let off = 24, n = 0;
+    while (off + 16 <= buf.length && n < 300000) {
+      const tsec = u32(off), tsub = u32(off + 4), incl = u32(off + 8); off += 16;
+      if (incl <= 0 || off + incl > buf.length) break;
+      const ts = new Date(tsec * 1000 + (nano ? tsub / 1e6 : tsub / 1e3)).toISOString();
+      let p = off; // start of link-layer
+      let l3 = -1;
+      if (linktype === 1) { const et = (buf[p + 12] << 8) | buf[p + 13]; if (et === 0x0800) l3 = p + 14; else if (et === 0x8100 && ((buf[p + 16] << 8) | buf[p + 17]) === 0x0800) l3 = p + 18; }
+      else if (linktype === 101) { l3 = p; }
+      else if (linktype === 113) { if (((buf[p + 14] << 8) | buf[p + 15]) === 0x0800) l3 = p + 16; }
+      off += incl; n++;
+      if (l3 < 0 || l3 + 20 > buf.length || (buf[l3] >> 4) !== 4) continue;
+      const ihl = (buf[l3] & 0x0f) * 4; const proto = buf[l3 + 9];
+      const saddr = ip4(l3 + 12), daddr = ip4(l3 + 16); const l4 = l3 + ihl;
+      let sport = "", dport = "", pname = proto === 6 ? "tcp" : proto === 17 ? "udp" : proto === 1 ? "icmp" : String(proto);
+      if ((proto === 6 || proto === 17) && l4 + 4 <= buf.length) { sport = ((buf[l4] << 8) | buf[l4 + 1]); dport = ((buf[l4 + 2] << 8) | buf[l4 + 3]); }
+      const key = `${saddr}|${sport}|${daddr}|${dport}|${pname}`;
+      const fl = flows[key] || (flows[key] = { saddr, daddr, sport, dport, proto: pname, first: ts, last: ts, pkts: 0, bytes: 0 });
+      fl.pkts++; fl.bytes += incl; fl.last = ts;
+    }
+    const flist = Object.values(flows);
+    flist.forEach((f) => { if (f.daddr) extractIocs(f.daddr, iocs, seen); if (f.saddr) extractIocs(f.saddr, iocs, seen); });
+    const events = flist.map((f) => mkEvent("pcap", "flow", { ts: f.first, saddr: f.saddr, sport: f.sport, daddr: f.daddr, dport: f.dport, proto: f.proto,
+      msg: `${f.proto} ${f.saddr}:${f.sport} -> ${f.daddr}:${f.dport} (${f.pkts} pkts, ${f.bytes} B)`, fields: { packets: f.pkts, bytes: f.bytes, last: f.last }, raw: null }));
+    return { timeline: [], iocs, findings: [], events, stats: { packets: n, flows: flist.length } };
   },
 };
 
 // ---------- registry / public API ----------
-const PROFILES = [chainsaw, suricata, agent];
+const PROFILES = [chainsaw, suricata, zeek, pcap, agent];
 function profileList() { return PROFILES.map((p) => ({ id: p.id, label: p.label })); }
+exports.mapFromEvents = mapFromEvents;
 
 function readAll(text, filename) {
   const f = (filename || "").toLowerCase();
@@ -353,7 +514,7 @@ function parse(text, filename, profileId) {
   if (!prof) prof = PROFILES.find((p) => { try { return p.detect(text, filename, csv, json); } catch { return false; } });
   if (!prof) return { profile: null, error: "No matching ingest profile. Supported: " + PROFILES.map((p) => p.label).join(", "), timeline: [], iocs: [], findings: [] };
   const out = prof.normalize(text, filename, csv, json);
-  return { profile: prof.id, profileLabel: prof.label, ...out, stats: { timeline: out.timeline.length, iocs: out.iocs.length, findings: out.findings.length } };
+  return { profile: prof.id, profileLabel: prof.label, ...out, stats: { timeline: (out.timeline || []).length, iocs: (out.iocs || []).length, findings: (out.findings || []).length, events: (out.events || []).length } };
 }
 
 /** Flag which proposed items are new vs already present, given the existing case data. */

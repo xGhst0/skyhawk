@@ -49,13 +49,18 @@ a drag-and-drop network map. Reconstruct the attack on an incident timeline.
 Track indicators that get auto-classified (IP, domain, URL, hash, CVE, and more)
 and pulled straight out of your finding text.
 
-**Ingest and collect.** Drop a **Chainsaw** Sigma-hunt export or a **Suricata**
-`eve.json` into the Ingest tab and it becomes findings, timeline events and IOCs,
-deduped against the case — Suricata alerts are grouped by signature, mapped to
-ATT&CK from the rule metadata, with the source/destination and any file hashes
-pulled out as IOCs. Deploy the read-only **collection agent** to hosts on your
-network and pull live triage back into a case with one click — no third-party EDR
-required.
+**Ingest and collect.** Drop a **Chainsaw** Sigma-hunt export, a **Suricata**
+`eve.json`, **Zeek** logs, or a **PCAP** into the Ingest tab and it's parsed
+locally into findings, timeline events and IOCs, deduped against the case.
+Deploy the read-only **collection agent** to hosts on your network and pull live
+triage back into a case with one click — no third-party EDR required.
+
+**Browse it like a SIEM.** Every ingested event is kept in SKYHAWK's own
+append-only **event lake**, and a dedicated **SIEM tab** lets analysts search and
+filter across sources (Suricata, Zeek, PCAP flows, agent event logs) and click any
+row to see the full raw event. The same network data also **builds the network
+map for you**: hosts become nodes, zoned internal vs external, and observed
+connections become connectors labelled with the protocol or ATT&CK technique.
 
 **Understand and respond.** Every technique in the **full MITRE ATT&CK Enterprise
 matrix** is searchable, with a keyword suggester so you do not need to memorise

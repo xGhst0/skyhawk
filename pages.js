@@ -70,6 +70,9 @@ button.on{background:var(--accent);border-color:var(--accent);color:var(--accent
 .bar{height:8px;background:var(--bg);border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:1}.bar>div{height:100%;background:var(--accent);transition:width .2s}
 .tlrow{display:flex;gap:10px;align-items:baseline;padding:7px 10px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;margin-bottom:6px;background:var(--card)}
 .iocrow{display:flex;gap:9px;align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;background:var(--card)}
+.srow{border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:4px;background:var(--card);cursor:pointer;font-size:13px}
+.srow:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
+.rawbox{font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px;margin-top:7px;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--txt)}
 .tkrow{display:flex;gap:9px;align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;background:var(--card)}
 .tkrow.done{opacity:.55}.tkrow.done .tktext{text-decoration:line-through}
 .subtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px}
@@ -231,6 +234,7 @@ function workspace(id) {
 <div class="tabs">
   <div class="tab on" onclick="showTab('findings')" id="tab-findings">Findings</div>
   <div class="tab" onclick="showTab('ingest')" id="tab-ingest">Ingest</div>
+  <div class="tab" onclick="showTab('siem')" id="tab-siem">SIEM</div>
   <div class="tab" onclick="showTab('agents')" id="tab-agents">Agents</div>
   <div class="tab" onclick="showTab('timeline')" id="tab-timeline">Timeline</div>
   <div class="tab" onclick="showTab('iocs')" id="tab-iocs">IOCs</div>
@@ -276,12 +280,23 @@ function workspace(id) {
 <div class="panel" id="p-ingest">
   <h2>Ingest evidence</h2>
   <div class="card">
-    <div class="k" style="margin-bottom:8px">Drop a structured tool export — <b>Chainsaw</b> Sigma-hunt CSV/JSON today. It's parsed <b>locally</b> and mapped to timeline events, IOCs and findings; nothing leaves this machine. Review and pick what to import.</div>
-    <div class="row" style="margin-bottom:8px"><input type="file" id="ingFile" accept=".csv,.json,.jsonl,.ndjson,.tsv" style="flex:1;min-width:180px"><select id="ingProfile" style="width:190px"><option value="">auto-detect profile</option></select><button onclick="ingAnalyze()">Analyze</button></div>
+    <div class="k" style="margin-bottom:8px">Drop a tool export — <b>Chainsaw</b>, <b>Suricata</b> (eve.json), <b>Zeek</b> logs, or a <b>PCAP</b>. It's parsed <b>locally</b> into findings, timeline, IOCs, raw events (searchable in the SIEM tab) and network-map hosts + links; nothing leaves this machine. Review and pick what to import.</div>
+    <div class="row" style="margin-bottom:8px"><input type="file" id="ingFile" accept=".csv,.json,.jsonl,.ndjson,.tsv,.log,.pcap,.pcapng,.cap" style="flex:1;min-width:180px"><select id="ingProfile" style="width:190px"><option value="">auto-detect profile</option></select><button onclick="ingAnalyze()">Analyze</button></div>
     <textarea id="ingText" style="width:100%;min-height:64px" placeholder="…or paste the export contents here"></textarea>
     <div class="k" id="ingStatus" style="margin-top:6px"></div>
   </div>
   <div id="ingPreview"></div>
+</div>
+<div class="panel" id="p-siem">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">SIEM · event lake</h2><button class="ghost" onclick="loadSiem(true)">Refresh</button></div>
+  <div class="row" style="margin-bottom:8px">
+    <input id="siemQ" class="t" placeholder="Search events — IP, host, signature, command, domain…" onkeydown="if(event.key==='Enter')loadSiem(true)">
+    <select id="siemSrc" style="width:170px" onchange="loadSiem(true)"><option value="">all sources</option></select>
+    <button onclick="loadSiem(true)">Search</button>
+  </div>
+  <div class="k" id="siemMeta" style="margin-bottom:8px"></div>
+  <div id="siemRows"></div>
+  <div class="row" style="margin-top:10px"><button class="ghost" id="siemMore" onclick="loadSiem(false)" style="display:none">Load more</button></div>
 </div>
 <div class="panel" id="p-agents">
   <div class="row" style="justify-content:space-between;margin-bottom:6px"><h2 style="margin:0">Collection agents</h2><button class="ghost" onclick="loadAgents()">Refresh</button></div>
@@ -352,11 +367,12 @@ function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(function(){lo
 buildAppx(uid);initPrefs(uid);
 document.getElementById('rlink').href='/investigations/'+encodeURIComponent(INV)+'/report/technical';
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({actorId:uid},b||{}))});const j=await r.json().catch(()=>({}));if(!r.ok){alert(j.error||'error');throw new Error(j.error);}return j;}
-function showTab(t){['findings','ingest','agents','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
+function showTab(t){['findings','ingest','siem','agents','timeline','iocs','tasks','map','report','audit'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('on',x===t);document.getElementById('p-'+x).classList.toggle('on',x===t);});
   if(t==='report'){refreshReport();}
   if(t==='map'){mRender();}
   if(t==='audit'){loadAudit();}
   if(t==='ingest'){ingInitProfiles();}
+  if(t==='siem'){loadSiem(true);}
   if(t==='agents'){loadAgents();}
   if(t==='timeline'&&!document.getElementById('tlat').value){setTlNow();}}
 function dl(name,obj){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},4000);}
@@ -557,17 +573,19 @@ async function loadAudit(){
   }).join('')||'<div class="empty">No events recorded yet.</div>';
 }
 // ---- evidence ingestion ----
-let ingData=null,ingProfilesLoaded=false;
+let ingData=null,ingProfilesLoaded=false,ingSrcText='',ingSrcName='';
 async function ingInitProfiles(){if(ingProfilesLoaded)return;ingProfilesLoaded=true;try{const ps=await (await fetch('/api/ingest/profiles')).json();const sel=document.getElementById('ingProfile');ps.forEach(function(p){const o=document.createElement('option');o.value=p.id;o.textContent=p.label;sel.appendChild(o);});}catch(e){}}
-function ingReadFile(){return new Promise(function(res){const f=document.getElementById('ingFile');if(f.files&&f.files[0]){const rd=new FileReader();rd.onload=function(){res({text:rd.result,name:f.files[0].name});};rd.readAsText(f.files[0]);}else res({text:document.getElementById('ingText').value,name:''});});}
+function ingReadFile(){return new Promise(function(res){const f=document.getElementById('ingFile');if(f.files&&f.files[0]){const file=f.files[0];const isBin=/\.pcap$|\.pcapng$|\.cap$/i.test(file.name);const rd=new FileReader();rd.onload=function(){let text=rd.result;if(isBin){const i=String(text).indexOf('base64,');text=i>=0?String(text).slice(i+7):String(text);}res({text:text,name:file.name});};if(isBin)rd.readAsDataURL(file);else rd.readAsText(file);}else res({text:document.getElementById('ingText').value,name:''});});}
 async function ingAnalyze(){
   const st=document.getElementById('ingStatus');st.textContent='Parsing locally…';
   const src=await ingReadFile();
   if(!src.text||!src.text.trim()){st.textContent='Choose a file or paste an export first.';return;}
+  ingSrcText=src.text;ingSrcName=src.name;
   const r=await post('/api/investigations/'+encodeURIComponent(INV)+'/ingest/preview',{text:src.text,filename:src.name,profile:document.getElementById('ingProfile').value});
   if(r.error){st.textContent=r.error;document.getElementById('ingPreview').innerHTML='';return;}
   ingData=r;
-  st.innerHTML='Parsed with <b>'+esc(r.profileLabel)+'</b> — '+r.findings.length+' findings, '+r.timeline.length+' timeline events, '+r.iocs.length+' IOCs ('+r.newCounts.findings+'/'+r.newCounts.timeline+'/'+r.newCounts.iocs+' new).';
+  const ev=(r.stats&&r.stats.events)||0;
+  st.innerHTML='Parsed with <b>'+esc(r.profileLabel)+'</b> — '+r.findings.length+' findings, '+r.timeline.length+' timeline, '+r.iocs.length+' IOCs'+(ev?', <b>'+ev+'</b> raw events → SIEM lake + map':'')+' ('+r.newCounts.findings+'/'+r.newCounts.timeline+'/'+r.newCounts.iocs+' new).';
   renderIngest();
 }
 function ingGroup(title,key,items,render){
@@ -589,14 +607,48 @@ function ingToggle(key,on){[].forEach.call(document.querySelectorAll('input[data
 async function ingImport(){
   if(!ingData)return;
   const pick=function(key,arr){return [].filter.call(document.querySelectorAll('input[data-ing="'+key+'"]'),function(c){return c.checked;}).map(function(c){return arr[+c.getAttribute('data-i')];});};
-  const body={source:ingData.profileLabel||'ingest',findings:pick('findings',ingData.findings),timeline:pick('timeline',ingData.timeline),iocs:pick('iocs',ingData.iocs)};
+  const evAvail=(ingData.stats&&ingData.stats.events)||0;
+  const body={source:ingData.profileLabel||'ingest',findings:pick('findings',ingData.findings),timeline:pick('timeline',ingData.timeline),iocs:pick('iocs',ingData.iocs),
+    text:ingSrcText,profile:ingData.profile,filename:ingSrcName};
   const total=body.findings.length+body.timeline.length+body.iocs.length;
-  if(!total){document.getElementById('ingImportStatus').textContent='Nothing selected.';return;}
-  document.getElementById('ingImportStatus').textContent='Importing '+total+'…';
+  if(!total&&!evAvail){document.getElementById('ingImportStatus').textContent='Nothing selected.';return;}
+  document.getElementById('ingImportStatus').textContent='Importing…';
   const r=await post('/api/investigations/'+encodeURIComponent(INV)+'/ingest/commit',body);
-  document.getElementById('ingImportStatus').innerHTML='<span class="badge b-ok">imported</span> '+r.findings+' findings · '+r.timeline+' events · '+r.iocs+' IOCs';
-  ingData=null;document.getElementById('ingPreview').innerHTML='';document.getElementById('ingText').value='';document.getElementById('ingFile').value='';
-  sigF='';sigT='';sigI='';tick();
+  let extra='';if(r.events)extra+=' · '+r.events+' events → lake';if(r.mapNodes||r.mapEdges)extra+=' · map +'+(r.mapNodes||0)+' hosts/'+(r.mapEdges||0)+' links';
+  document.getElementById('ingImportStatus').innerHTML='<span class="badge b-ok">imported</span> '+r.findings+' findings · '+r.timeline+' timeline · '+r.iocs+' IOCs'+extra;
+  ingData=null;ingSrcText='';document.getElementById('ingPreview').innerHTML='';document.getElementById('ingText').value='';document.getElementById('ingFile').value='';
+  sigF='';sigT='';sigI='';mLoaded=false;tick();
+}
+
+// ---- SIEM tab (browse/search the event lake) ----
+let siemOffset=0,siemTotal=0;
+function siemRow(e){
+  const t=(e.ts||'').replace('T',' ').slice(0,19);
+  const flow=(e.saddr||e.daddr)?((e.saddr||'?')+(e.sport?':'+e.sport:'')+' → '+(e.daddr||'?')+(e.dport?':'+e.dport:'')):'';
+  const hit=(e.attack&&e.attack.length)?'<span class="dot high"></span>':'';
+  const atk=(e.attack&&e.attack.length)?' '+e.attack.map(function(a){return '<span class="pill">'+esc(a)+'</span>';}).join(''):'';
+  return '<div class="srow" onclick="siemExpand(this)"><div class="row" style="gap:9px;align-items:baseline;flex-wrap:nowrap">'
+    +'<span class="mono" style="white-space:nowrap;color:var(--mut)">'+esc(t)+'</span>'
+    +'<span class="pill">'+esc(e.source)+'</span><span class="mono k" style="white-space:nowrap">'+esc(e.type)+'</span>'
+    +'<span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+hit+esc(e.msg||'')+atk+(flow?' <span class="mono" style="color:var(--mut)">'+esc(flow)+'</span>':'')+'</span></div>'
+    +'<pre class="rawbox" style="display:none">'+esc(JSON.stringify(e.raw!=null?e.raw:{ts:e.ts,source:e.source,type:e.type,fields:e.fields},null,2))+'</pre></div>';
+}
+function siemExpand(el){const p=el.querySelector('.rawbox');if(p)p.style.display=(p.style.display==='none'?'block':'none');}
+async function loadSiem(reset){
+  if(reset)siemOffset=0;
+  const q=document.getElementById('siemQ').value.trim();const src=document.getElementById('siemSrc').value;
+  let r;try{r=await (await fetch('/api/investigations/'+encodeURIComponent(INV)+'/lake?q='+encodeURIComponent(q)+'&source='+encodeURIComponent(src)+'&limit=100&offset='+siemOffset)).json();}catch(e){document.getElementById('siemMeta').textContent='Could not load events.';return;}
+  if(r.error){document.getElementById('siemMeta').textContent=r.error;return;}
+  siemTotal=r.total;
+  if(reset){
+    const sel=document.getElementById('siemSrc');
+    sel.innerHTML=['<option value="">all sources ('+r.count+')</option>'].concat(Object.keys(r.sources).sort().map(function(s){return '<option value="'+esc(s)+'"'+(s===src?' selected':'')+'>'+esc(s)+' ('+r.sources[s]+')</option>';})).join('');
+  }
+  document.getElementById('siemMeta').innerHTML=r.count?('<b>'+r.total+'</b> matching · '+r.count+' events in the lake'+((q||src)?' · filtered':'')+' · click a row for the raw event'):'No events yet — ingest Suricata, Zeek, a PCAP, or run an agent <b>event logs</b> collection, then they appear here.';
+  const rows=r.events.map(siemRow).join('');
+  const box=document.getElementById('siemRows');box.innerHTML=(reset?'':box.innerHTML)+(rows||(reset?'<div class="empty">No matching events.</div>':''));
+  siemOffset+=r.events.length;
+  document.getElementById('siemMore').style.display=(siemOffset<siemTotal)?'inline-block':'none';
 }
 
 // ---- collection agents ----
