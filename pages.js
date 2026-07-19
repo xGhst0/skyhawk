@@ -289,11 +289,12 @@ function workspace(id) {
 </div>
 <div class="panel" id="p-siem">
   <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">SIEM · event lake</h2><button class="ghost" onclick="loadSiem(true)">Refresh</button></div>
-  <div class="row" style="margin-bottom:8px">
-    <input id="siemQ" class="t" placeholder="Search events — IP, host, signature, command, domain…" onkeydown="if(event.key==='Enter')loadSiem(true)">
+  <div class="row" style="margin-bottom:4px">
+    <input id="siemQ" class="t mono" placeholder="e.g.  source:suricata dest:45.155.204.11 attack:T1071  ·  or free text" onkeydown="if(event.key==='Enter')loadSiem(true)">
     <select id="siemSrc" style="width:170px" onchange="loadSiem(true)"><option value="">all sources</option></select>
     <button onclick="loadSiem(true)">Search</button>
   </div>
+  <div class="k" style="margin-bottom:10px">Fields: <span class="mono">source type host src dest sport dport proto attack msg</span> · combine with spaces (AND), <span class="mono">OR</span>, and <span class="mono">-</span> to exclude · quote values with spaces.</div>
   <div id="siemDash"></div>
   <div class="k" id="siemMeta" style="margin-bottom:8px"></div>
   <div id="siemRows"></div>
@@ -642,9 +643,9 @@ async function siemToIoc(i,ev){if(ev)ev.stopPropagation();const e=siemEvents[i];
 function siemDash(top,sources){
   const chip=function(txt,q){return '<span class="pill" style="cursor:pointer;margin:2px 4px 2px 0;display:inline-block" onclick="siemSet('+Q+String(q).replace(/'/g,"")+Q+')">'+esc(txt)+'</span>';};
   let h='<div class="card" style="margin-bottom:10px"><div class="row" style="gap:22px;align-items:flex-start;flex-wrap:wrap">';
-  if(top&&top.dstIps&&top.dstIps.length)h+='<div><div class="k" style="margin-bottom:4px">Top destinations</div>'+top.dstIps.map(function(x){return chip(x.k+' · '+x.v,x.k);}).join('')+'</div>';
-  if(top&&top.srcIps&&top.srcIps.length)h+='<div><div class="k" style="margin-bottom:4px">Top sources</div>'+top.srcIps.map(function(x){return chip(x.k+' · '+x.v,x.k);}).join('')+'</div>';
-  if(top&&top.attacks&&top.attacks.length)h+='<div><div class="k" style="margin-bottom:4px">ATT&CK seen</div>'+top.attacks.map(function(x){return chip(x.k+' · '+x.v,x.k);}).join('')+'</div>';
+  if(top&&top.dstIps&&top.dstIps.length)h+='<div><div class="k" style="margin-bottom:4px">Top destinations</div>'+top.dstIps.map(function(x){return chip(x.k+' · '+x.v,'dest:'+x.k);}).join('')+'</div>';
+  if(top&&top.srcIps&&top.srcIps.length)h+='<div><div class="k" style="margin-bottom:4px">Top sources</div>'+top.srcIps.map(function(x){return chip(x.k+' · '+x.v,'src:'+x.k);}).join('')+'</div>';
+  if(top&&top.attacks&&top.attacks.length)h+='<div><div class="k" style="margin-bottom:4px">ATT&CK seen</div>'+top.attacks.map(function(x){return chip(x.k+' · '+x.v,'attack:'+x.k);}).join('')+'</div>';
   h+='</div></div>';
   document.getElementById('siemDash').innerHTML=(top&&(top.dstIps.length||top.srcIps.length||top.attacks.length))?h:'';
 }
