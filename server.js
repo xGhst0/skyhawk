@@ -493,6 +493,7 @@ async function exportInv(invId) {
     skyhawkBundle: 1, exportedAt: new Date().toISOString(),
     investigation: inv, findings,
     timeline: await subDoc("timeline", invId), iocs: await subDoc("iocs", invId), tasks: await subDoc("tasks", invId),
+    lake: lake.dump(invId),
     audit: auditRec ? auditRec.events : [],
   };
 }
@@ -517,6 +518,7 @@ async function importInv(b) {
   await subSave("timeline", id, bun.timeline || []);
   await subSave("iocs", id, bun.iocs || []);
   await subSave("tasks", id, bun.tasks || []);
+  if (Array.isArray(bun.lake) && bun.lake.length) lake.append(id, bun.lake);
   const l = new AuditLog(); l.load(Array.isArray(bun.audit) ? bun.audit : []);
   const chainIntact = l.verify();
   l.record(actor.id, "investigation.imported", id, { from: bun.investigation.id, chainIntact });

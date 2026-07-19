@@ -294,6 +294,7 @@ function workspace(id) {
     <select id="siemSrc" style="width:170px" onchange="loadSiem(true)"><option value="">all sources</option></select>
     <button onclick="loadSiem(true)">Search</button>
   </div>
+  <div id="siemDash"></div>
   <div class="k" id="siemMeta" style="margin-bottom:8px"></div>
   <div id="siemRows"></div>
   <div class="row" style="margin-top:10px"><button class="ghost" id="siemMore" onclick="loadSiem(false)" style="display:none">Load more</button></div>
@@ -621,21 +622,34 @@ async function ingImport(){
 }
 
 // ---- SIEM tab (browse/search the event lake) ----
-let siemOffset=0,siemTotal=0;
-function siemRow(e){
+let siemOffset=0,siemTotal=0,siemEvents=[];
+function siemSet(q){document.getElementById('siemQ').value=q;loadSiem(true);}
+function siemRow(e,i){
   const t=(e.ts||'').replace('T',' ').slice(0,19);
   const flow=(e.saddr||e.daddr)?((e.saddr||'?')+(e.sport?':'+e.sport:'')+' → '+(e.daddr||'?')+(e.dport?':'+e.dport:'')):'';
   const hit=(e.attack&&e.attack.length)?'<span class="dot high"></span>':'';
   const atk=(e.attack&&e.attack.length)?' '+e.attack.map(function(a){return '<span class="pill">'+esc(a)+'</span>';}).join(''):'';
-  return '<div class="srow" onclick="siemExpand(this)"><div class="row" style="gap:9px;align-items:baseline;flex-wrap:nowrap">'
+  const pivot=hasCap('finding.create')?'<div class="row" style="gap:6px;margin-top:7px"><button class="ghost" onclick="siemToTimeline('+i+',event)">→ timeline</button>'+((e.daddr||e.saddr)?'<button class="ghost" onclick="siemToIoc('+i+',event)">→ IOC</button>':'')+'<span class="k" id="sp-'+i+'"></span></div>':'';
+  return '<div class="srow"><div class="row" style="gap:9px;align-items:baseline;flex-wrap:nowrap" onclick="siemExpand(this)">'
     +'<span class="mono" style="white-space:nowrap;color:var(--mut)">'+esc(t)+'</span>'
     +'<span class="pill">'+esc(e.source)+'</span><span class="mono k" style="white-space:nowrap">'+esc(e.type)+'</span>'
     +'<span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+hit+esc(e.msg||'')+atk+(flow?' <span class="mono" style="color:var(--mut)">'+esc(flow)+'</span>':'')+'</span></div>'
-    +'<pre class="rawbox" style="display:none">'+esc(JSON.stringify(e.raw!=null?e.raw:{ts:e.ts,source:e.source,type:e.type,fields:e.fields},null,2))+'</pre></div>';
+    +'<div class="rawwrap" style="display:none">'+pivot+'<pre class="rawbox">'+esc(JSON.stringify(e.raw!=null?e.raw:{ts:e.ts,source:e.source,type:e.type,fields:e.fields},null,2))+'</pre></div></div>';
 }
-function siemExpand(el){const p=el.querySelector('.rawbox');if(p)p.style.display=(p.style.display==='none'?'block':'none');}
+function siemExpand(el){const p=el.parentNode.querySelector('.rawwrap');if(p)p.style.display=(p.style.display==='none'?'block':'none');}
+async function siemToTimeline(i,ev){if(ev)ev.stopPropagation();const e=siemEvents[i];if(!e)return;await post('/api/investigations/'+encodeURIComponent(INV)+'/timeline',{text:('['+e.source+'] '+(e.msg||'')).slice(0,480),at:e.ts,source:'SIEM'});document.getElementById('sp-'+i).innerHTML='<span class="badge b-ok">added to timeline</span>';sigT='';tick();}
+async function siemToIoc(i,ev){if(ev)ev.stopPropagation();const e=siemEvents[i];const v=e.daddr||e.saddr;if(!v)return;await post('/api/investigations/'+encodeURIComponent(INV)+'/iocs',{value:v,note:'from SIEM event ('+e.source+')'});document.getElementById('sp-'+i).innerHTML='<span class="badge b-ok">tracked '+esc(v)+'</span>';sigI='';tick();}
+function siemDash(top,sources){
+  const chip=function(txt,q){return '<span class="pill" style="cursor:pointer;margin:2px 4px 2px 0;display:inline-block" onclick="siemSet('+Q+String(q).replace(/'/g,"")+Q+')">'+esc(txt)+'</span>';};
+  let h='<div class="card" style="margin-bottom:10px"><div class="row" style="gap:22px;align-items:flex-start;flex-wrap:wrap">';
+  if(top&&top.dstIps&&top.dstIps.length)h+='<div><div class="k" style="margin-bottom:4px">Top destinations</div>'+top.dstIps.map(function(x){return chip(x.k+' · '+x.v,x.k);}).join('')+'</div>';
+  if(top&&top.srcIps&&top.srcIps.length)h+='<div><div class="k" style="margin-bottom:4px">Top sources</div>'+top.srcIps.map(function(x){return chip(x.k+' · '+x.v,x.k);}).join('')+'</div>';
+  if(top&&top.attacks&&top.attacks.length)h+='<div><div class="k" style="margin-bottom:4px">ATT&CK seen</div>'+top.attacks.map(function(x){return chip(x.k+' · '+x.v,x.k);}).join('')+'</div>';
+  h+='</div></div>';
+  document.getElementById('siemDash').innerHTML=(top&&(top.dstIps.length||top.srcIps.length||top.attacks.length))?h:'';
+}
 async function loadSiem(reset){
-  if(reset)siemOffset=0;
+  if(reset){siemOffset=0;siemEvents=[];}
   const q=document.getElementById('siemQ').value.trim();const src=document.getElementById('siemSrc').value;
   let r;try{r=await (await fetch('/api/investigations/'+encodeURIComponent(INV)+'/lake?q='+encodeURIComponent(q)+'&source='+encodeURIComponent(src)+'&limit=100&offset='+siemOffset)).json();}catch(e){document.getElementById('siemMeta').textContent='Could not load events.';return;}
   if(r.error){document.getElementById('siemMeta').textContent=r.error;return;}
@@ -643,9 +657,12 @@ async function loadSiem(reset){
   if(reset){
     const sel=document.getElementById('siemSrc');
     sel.innerHTML=['<option value="">all sources ('+r.count+')</option>'].concat(Object.keys(r.sources).sort().map(function(s){return '<option value="'+esc(s)+'"'+(s===src?' selected':'')+'>'+esc(s)+' ('+r.sources[s]+')</option>';})).join('');
+    siemDash(r.top,r.sources);
   }
   document.getElementById('siemMeta').innerHTML=r.count?('<b>'+r.total+'</b> matching · '+r.count+' events in the lake'+((q||src)?' · filtered':'')+' · click a row for the raw event'):'No events yet — ingest Suricata, Zeek, a PCAP, or run an agent <b>event logs</b> collection, then they appear here.';
-  const rows=r.events.map(siemRow).join('');
+  const base=siemEvents.length;
+  siemEvents=siemEvents.concat(r.events);
+  const rows=r.events.map(function(e,k){return siemRow(e,base+k);}).join('');
   const box=document.getElementById('siemRows');box.innerHTML=(reset?'':box.innerHTML)+(rows||(reset?'<div class="empty">No matching events.</div>':''));
   siemOffset+=r.events.length;
   document.getElementById('siemMore').style.display=(siemOffset<siemTotal)?'inline-block':'none';

@@ -9,6 +9,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.append = append;
 exports.query = query;
 exports.stats = stats;
+exports.dump = dump;
 exports.clear = clear;
 
 const fs = require("fs");
@@ -36,10 +37,19 @@ function readAll(invId) {
   return out;
 }
 
+function topN(o, n) { return Object.keys(o).map((k) => ({ k, v: o[k] })).sort((a, b) => b.v - a.v).slice(0, n); }
+
 function query(invId, opts) {
   opts = opts || {};
   const all = readAll(invId);
-  const sources = {}; for (const e of all) sources[e.source || "?"] = (sources[e.source || "?"] || 0) + 1;
+  const sources = {}, srcIps = {}, dstIps = {}, attacks = {};
+  for (const e of all) {
+    sources[e.source || "?"] = (sources[e.source || "?"] || 0) + 1;
+    if (e.saddr) srcIps[e.saddr] = (srcIps[e.saddr] || 0) + 1;
+    if (e.daddr) dstIps[e.daddr] = (dstIps[e.daddr] || 0) + 1;
+    (e.attack || []).forEach((a) => { attacks[a] = (attacks[a] || 0) + 1; });
+  }
+  const top = { srcIps: topN(srcIps, 6), dstIps: topN(dstIps, 6), attacks: topN(attacks, 8) };
   let rows = all;
   if (opts.source) rows = rows.filter((e) => e.source === opts.source);
   const from = opts.from ? Date.parse(opts.from) : NaN, to = opts.to ? Date.parse(opts.to) : NaN;
@@ -50,8 +60,10 @@ function query(invId, opts) {
   rows.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0)); // newest first
   const total = rows.length;
   const limit = Math.min(Math.max(1, opts.limit || 100), 500), offset = Math.max(0, opts.offset || 0);
-  return { total, count: all.length, sources, events: rows.slice(offset, offset + limit) };
+  return { total, count: all.length, sources, top, events: rows.slice(offset, offset + limit) };
 }
+
+function dump(invId) { return readAll(invId); }
 
 function stats(invId) {
   const all = readAll(invId);
